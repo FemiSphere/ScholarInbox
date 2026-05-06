@@ -72,12 +72,30 @@ def title_similarity(left: str, right: str) -> float:
         ) * 100
 
 
-def deduplicate_entries(entries: list[PaperEntry], fuzzy_title_threshold: int = 92) -> DeduplicationResult:
+def deduplicate_entries(
+    entries: list[PaperEntry],
+    fuzzy_title_threshold: int = 92,
+    *,
+    existing_entries: list[PaperEntry] | None = None,
+) -> DeduplicationResult:
     unique: list[PaperEntry] = []
     seen_dois: set[str] = set()
     seen_urls: set[str] = set()
     seen_titles: set[str] = set()
+    comparison_entries: list[PaperEntry] = []
     duplicates = 0
+
+    for existing in existing_entries or []:
+        doi = normalize_doi(existing.doi or existing.url or existing.raw_text)
+        url = canonicalize_url(existing.url)
+        title = normalize_title(existing.title)
+        if doi:
+            seen_dois.add(doi)
+        if url:
+            seen_urls.add(url)
+        if title:
+            seen_titles.add(title)
+            comparison_entries.append(existing)
 
     for entry in entries:
         doi = normalize_doi(entry.doi or entry.url or entry.raw_text)
@@ -94,7 +112,7 @@ def deduplicate_entries(entries: list[PaperEntry], fuzzy_title_threshold: int = 
         elif title:
             duplicate = any(
                 title_similarity(title, normalize_title(existing.title)) >= fuzzy_title_threshold
-                for existing in unique
+                for existing in comparison_entries
                 if existing.title
             )
 
@@ -110,6 +128,7 @@ def deduplicate_entries(entries: list[PaperEntry], fuzzy_title_threshold: int = 
             seen_urls.add(url)
         if title:
             seen_titles.add(title)
+            comparison_entries.append(entry)
         unique.append(entry)
 
     return DeduplicationResult(unique_entries=unique, duplicates_removed=duplicates)

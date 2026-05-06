@@ -69,6 +69,11 @@ digest:
   max_high_relevance: 20
   max_medium_relevance: 30
   max_low_relevance: 80
+  # 是否过滤最近已输出 digest 中出现过的论文，减少 Google Scholar 重复推送。
+  suppress_recent_output_duplicates: true
+  # 同时参考最近几天和最近几个 Markdown digest 文件；两者取并集。
+  recent_output_lookback_days: 5
+  recent_output_lookback_files: 5
 
 safety:
   dry_run_default: true

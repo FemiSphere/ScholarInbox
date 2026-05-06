@@ -18,7 +18,25 @@ def test_dedupe_by_doi_url_and_fuzzy_title():
     assert len(result.unique_entries) == 3
 
 
+def test_dedupe_can_filter_against_existing_entries():
+    historical = [
+        PaperEntry(title="Thermal transport in pentagonal COF nanotubes", doi="10.1000/old"),
+        PaperEntry(title="Machine learning interatomic potentials for atomistic simulations"),
+        PaperEntry(title="URL duplicate", url="https://example.org/paper?utm_source=alert"),
+    ]
+    entries = [
+        PaperEntry(title="Different title", doi="https://doi.org/10.1000/OLD"),
+        PaperEntry(title="Machine-learning potentials for atomistic simulation"),
+        PaperEntry(title="Same URL", url="https://example.org/paper"),
+        PaperEntry(title="New paper about phonons"),
+    ]
+
+    result = deduplicate_entries(entries, fuzzy_title_threshold=80, existing_entries=historical)
+
+    assert result.duplicates_removed == 3
+    assert [entry.title for entry in result.unique_entries] == ["New paper about phonons"]
+
+
 def test_normalizers():
     assert normalize_title("  A Study: Thermal-Conductivity! ") == "a study thermal conductivity"
     assert canonicalize_url("HTTPS://Example.org/A/?utm_source=x&keep=1#frag") == "https://example.org/A?keep=1"
-

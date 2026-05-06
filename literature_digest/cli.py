@@ -17,6 +17,7 @@ from .llm import build_llm_client
 from .models import DigestRun, RunStats, SkippedEmail
 from .parsers import parse_emails
 from .ranking import count_relevance, rank_papers
+from .recent_outputs import load_recent_output_entries
 from .sample_data import sample_emails
 
 
@@ -78,29 +79,63 @@ def main(argv: list[str] | None = None) -> int:
     progress.step(f"解析完成：{len(entries)} 个候选条目")
 
     progress.step("执行 DOI、URL、标题和模糊标题去重")
+    fuzzy_title_threshold = int(config["parsing"].get("fuzzy_title_threshold", 92))
     deduped = deduplicate_entries(
         entries,
-        fuzzy_title_threshold=int(config["parsing"].get("fuzzy_title_threshold", 92)),
+        fuzzy_title_threshold=fuzzy_title_threshold,
     )
     progress.step(
         f"去重完成：保留 {len(deduped.unique_entries)} 个条目，移除 {deduped.duplicates_removed} 个重复项"
     )
 
+    date_label = args.date or datetime.now().strftime("%Y-%m-%d")
+    candidate_entries = deduped.unique_entries
+    recent_duplicates_removed = 0
+    if not sample_mode and config["digest"].get("suppress_recent_output_duplicates", True):
+        history_entries, history_files = load_recent_output_entries(
+            _resolve_path(config["digest"]["output_dir"], base_dir),
+            date_label=date_label,
+            lookback_days=int(config["digest"].get("recent_output_lookback_days", 5)),
+            lookback_files=int(config["digest"].get("recent_output_lookback_files", 5)),
+        )
+        if history_files:
+            progress.step(
+                f"检查最近历史 digest 去重：读取 {len(history_files)} 个输出文件，"
+                f"识别 {len(history_entries)} 篇历史论文"
+            )
+        if history_entries:
+            history_filtered = deduplicate_entries(
+                candidate_entries,
+                fuzzy_title_threshold=fuzzy_title_threshold,
+                existing_entries=history_entries,
+            )
+            candidate_entries = history_filtered.unique_entries
+            recent_duplicates_removed = history_filtered.duplicates_removed
+            if recent_duplicates_removed:
+                warnings.append(
+                    f"最近历史输出过滤：参考最近 {len(history_files)} 个 digest 文件，"
+                    f"本次移除 {recent_duplicates_removed} 篇已输出论文。"
+                )
+                progress.step(f"历史输出去重完成：移除 {recent_duplicates_removed} 篇已输出论文")
+
     interests_path = _resolve_path(config["research_interests"]["path"], base_dir)
     interest_text = read_research_interests(interests_path)
-    if deduped.unique_entries:
+    if candidate_entries:
         progress.step("调用 LLM 提炼近期研究兴趣")
         interest_profile = analyze_research_interests(interest_text, llm)
-        progress.step(f"调用 LLM 分批排序和摘要：{len(deduped.unique_entries)} 篇论文")
+        progress.step(f"调用 LLM 分批排序和摘要：{len(candidate_entries)} 篇论文")
         ranked = rank_papers(
-            deduped.unique_entries,
+            candidate_entries,
             interest_profile,
             llm,
             progress=lambda current, total: progress.item(current, total, "LLM 排序批次"),
         )
         progress.step("LLM 排序和摘要完成")
     else:
-        warnings.append("没有找到可处理的未读论文条目，本次生成空 digest。")
+        if deduped.unique_entries and recent_duplicates_removed:
+            warnings.append("本次候选论文均已在最近历史 digest 中出现，因此生成空 digest。")
+        else:
+            warnings.append("没有找到可处理的未读论文条目，本次生成空 digest。")
         interest_profile = fallback_interest_profile(interest_text)
         ranked = []
 
@@ -111,13 +146,12 @@ def main(argv: list[str] | None = None) -> int:
         emails_read=len(emails),
         skipped_emails=len(skipped),
         paper_entries_extracted=len(entries),
-        duplicates_removed=deduped.duplicates_removed,
+        duplicates_removed=deduped.duplicates_removed + recent_duplicates_removed,
         high_relevance=count_relevance(ranked, "high"),
         medium_relevance=count_relevance(ranked, "medium"),
         low_relevance=count_relevance(ranked, "low"),
         sample_mode=sample_mode,
     )
-    date_label = args.date or datetime.now().strftime("%Y-%m-%d")
     run = DigestRun(
         date_label=date_label,
         stats=stats,
