@@ -17,6 +17,10 @@ class GmailDependencyError(RuntimeError):
     pass
 
 
+class GmailAuthenticationError(RuntimeError):
+    pass
+
+
 class GmailClient:
     def __init__(self, config: dict[str, Any], *, base_dir: Path | None = None) -> None:
         self.config = config
@@ -114,6 +118,7 @@ class GmailClient:
             return self._service
         try:
             from google.auth.transport.requests import Request
+            from google.auth.exceptions import RefreshError
             from google.oauth2.credentials import Credentials
             from google_auth_oauthlib.flow import InstalledAppFlow
             from googleapiclient.discovery import build
@@ -127,15 +132,25 @@ class GmailClient:
             creds = Credentials.from_authorized_user_file(str(self.token_path), GMAIL_SCOPES)
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                if not self.credentials_path.exists():
-                    raise FileNotFoundError(f"Gmail credentials not found: {self.credentials_path}")
-                flow = InstalledAppFlow.from_client_secrets_file(str(self.credentials_path), GMAIL_SCOPES)
-                creds = flow.run_local_server(port=0)
+                try:
+                    creds.refresh(Request())
+                except RefreshError as exc:
+                    if not _is_invalid_grant_error(exc):
+                        raise GmailAuthenticationError(
+                            "Gmail OAuth token refresh failed. Check network connectivity and OAuth configuration."
+                        ) from exc
+                    creds = None
+            if not creds or not creds.valid:
+                creds = self._authorize_with_browser(InstalledAppFlow)
             self.token_path.write_text(creds.to_json(), encoding="utf-8")
         self._service = build("gmail", "v1", credentials=creds)
         return self._service
+
+    def _authorize_with_browser(self, installed_app_flow):
+        if not self.credentials_path.exists():
+            raise FileNotFoundError(f"Gmail credentials not found: {self.credentials_path}")
+        flow = installed_app_flow.from_client_secrets_file(str(self.credentials_path), GMAIL_SCOPES)
+        return flow.run_local_server(port=0)
 
     def _walk_parts(
         self,
@@ -263,6 +278,11 @@ def _is_google_scholar_headers(sender: str, subject: str) -> bool:
         or "google 学术" in searchable
         or "google 學術" in searchable
     )
+
+
+def _is_invalid_grant_error(exc: BaseException) -> bool:
+    text = " ".join(str(part) for part in (getattr(exc, "args", None) or [exc])).lower()
+    return "invalid_grant" in text or "expired or revoked" in text
 
 
 def _is_likely_toc_image(filename: str, headers: dict[str, str]) -> bool:
