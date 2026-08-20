@@ -481,6 +481,8 @@ def _is_useful_image_src(src: str) -> bool:
         "footerimages",
         "/footerimages/",
         "/e/footerimages/",
+        "click.notification.",
+        "/ci0/",
         "eloquaimages",
         "arrow",
     )

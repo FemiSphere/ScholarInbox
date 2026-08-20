@@ -22,9 +22,13 @@ def normalize_doi(value: str) -> str:
 def canonicalize_url(url: str) -> str:
     if not url:
         return ""
-    split = urlsplit(url.strip())
+    cleaned = url.strip()
+    try:
+        split = urlsplit(cleaned)
+    except ValueError:
+        return cleaned.lower().rstrip("/")
     if not split.scheme and not split.netloc:
-        return url.strip().lower().rstrip("/")
+        return cleaned.lower().rstrip("/")
     query = []
     for key, value in parse_qsl(split.query, keep_blank_values=True):
         lower_key = key.lower()

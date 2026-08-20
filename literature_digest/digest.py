@@ -39,7 +39,9 @@ def write_digests(
 
     if "html" in selected:
         html_path = target_dir / f"{stem}.html"
-        html_path.write_text(render_html(run, target_dir), encoding="utf-8")
+        # The BOM keeps the page readable in viewers that ignore the HTML meta tag
+        # when a local file is opened directly. Browsers still treat it as UTF-8.
+        html_path.write_text(render_html(run, target_dir), encoding="utf-8-sig")
         written.append(html_path)
 
     return written
@@ -298,8 +300,8 @@ def render_html(run: DigestRun, output_dir: str | Path | None = None) -> str:
     .paper-card[data-level="medium"] {{ border-left-color: var(--medium); }}
     .paper-card[data-level="low"] {{ border-left-color: var(--low); }}
     .paper-top {{ display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }}
-    .paper-card h3 {{ margin: 0 0 8px; font-size: 20px; line-height: 1.35; letter-spacing: 0; }}
-    .meta {{ margin: 0 0 10px; color: var(--muted); font-size: 13px; }}
+    .paper-card h3 {{ margin: 0 0 8px; font-size: 20px; line-height: 1.35; letter-spacing: 0; overflow-wrap: anywhere; }}
+    .meta {{ margin: 0 0 10px; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }}
     .venue {{
       display: inline-flex;
       width: fit-content;
@@ -310,6 +312,7 @@ def render_html(run: DigestRun, output_dir: str | Path | None = None) -> str:
       color: var(--accent-strong);
       font-size: 13px;
       font-weight: 700;
+      overflow-wrap: anywhere;
     }}
     .score {{
       flex: 0 0 auto;
@@ -325,7 +328,7 @@ def render_html(run: DigestRun, output_dir: str | Path | None = None) -> str:
     .paper-card[data-level="high"] .score {{ color: var(--high); background: #fff1ee; border-color: #f0c7bf; }}
     .paper-card[data-level="medium"] .score {{ color: var(--medium); background: #fff7df; border-color: #ead49f; }}
     .paper-card[data-level="low"] .score {{ color: var(--low); background: #f2f5f7; border-color: #d4dde4; }}
-    .summary {{ margin: 10px 0; }}
+    .summary {{ margin: 10px 0; overflow-wrap: anywhere; }}
     details {{ margin-top: 10px; }}
     summary {{ cursor: pointer; color: var(--accent-strong); font-weight: 650; }}
     details[open] {{ border-top: 1px solid var(--border); padding-top: 10px; }}
@@ -354,6 +357,7 @@ def render_html(run: DigestRun, output_dir: str | Path | None = None) -> str:
       background: white;
       box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7);
     }}
+    .image-grid:empty {{ display: none; }}
     .skipped-list {{ margin: 0; padding-left: 18px; }}
     .skipped-list span, .skipped-list em {{ color: var(--muted); margin-left: 8px; font-size: 13px; }}
     .empty {{ display: none; padding: 24px; text-align: center; color: var(--muted); }}
@@ -453,6 +457,12 @@ def render_html(run: DigestRun, output_dir: str | Path | None = None) -> str:
     collapseAll.addEventListener('click', () => {{
       for (const item of document.querySelectorAll('.paper-card details')) item.open = false;
     }});
+    for (const img of document.querySelectorAll('.image-grid img')) {{
+      img.addEventListener('error', () => img.remove());
+      img.addEventListener('load', () => {{
+        if (img.naturalWidth <= 4 || img.naturalHeight <= 4) img.remove();
+      }});
+    }}
   </script>
 </body>
 </html>

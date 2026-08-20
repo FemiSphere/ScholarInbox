@@ -33,6 +33,23 @@ def test_parse_digest_markdown_extracts_paper_identities(tmp_path):
     assert entries[1].url == "https://example.org/b"
 
 
+def test_parse_digest_markdown_uses_last_link_when_title_contains_markdown_link(tmp_path):
+    digest = tmp_path / "2026-06-07-digest.md"
+    digest.write_text(
+        """# Digest
+
+### 1. Title
+- 英文原题：[https://www.apple.com/shop/refurbished/mac/mac-mini](https://www.apple.com... 阅读更多内容 | [链接](https://click.example.org/article)
+""",
+        encoding="utf-8",
+    )
+
+    entries = parse_digest_markdown(digest)
+
+    assert len(entries) == 1
+    assert entries[0].url == "https://click.example.org/article"
+
+
 def test_select_recent_digest_files_uses_day_and_file_lookback_union(tmp_path):
     files = [
         tmp_path / "2026-05-06-digest.md",

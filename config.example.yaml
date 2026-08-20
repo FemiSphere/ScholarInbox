@@ -24,6 +24,13 @@ gmail:
   # 首次授权后自动生成。不要手动填写，不要提交到 git。
   token_path: "token.json"
 
+  # Gmail API 单次网络请求超时秒数。网络不稳定或代理较慢时可适当调大。
+  request_timeout_seconds: 30
+
+  # 可选：显式为 Gmail API 设置代理。留空时自动读取 shell 环境变量。
+  # 示例："http://127.0.0.1:7897"
+  proxy_url: ""
+
 llm:
   # 主配置只选择一个 LLM 配置文件。
   # 默认使用 Codex CLI；如需切换 DeepSeek，请改为：

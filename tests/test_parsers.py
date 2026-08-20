@@ -156,6 +156,11 @@ class StructuredEmailClient:
         return extract_json_object(self.complete(prompt))
 
 
+class MalformedStructuredEmailClient:
+    def complete_json(self, prompt: str):
+        return extract_json_object('{"papers": [{"title": "Broken" "url": "https://example.com"}]}')
+
+
 def test_non_scholar_email_can_use_llm_structuring_and_skip_footer_links():
     email = EmailMessage(
         id="acs",
@@ -190,3 +195,53 @@ def test_non_scholar_email_can_use_llm_structuring_and_skip_footer_links():
     assert entries[0].image_paths == [
         "https://pubs.acs.org/cms/10.1021/acs.jpclett.4c01244/asset/images/medium/jz4c01244_0005.gif"
     ]
+
+
+def test_non_scholar_malformed_llm_json_falls_back_to_html_parser():
+    email = EmailMessage(
+        id="bad-json",
+        thread_id="t",
+        subject="Journal TOC",
+        sender="Journal <toc@example.org>",
+        date=None,
+        html="""
+        <html><body>
+          <a href="https://example.org/article">
+            Machine-learning interatomic potentials for thermal transport in framework materials
+          </a>
+          <p>Journal of Computational Materials, 2026. Thermal conductivity and phonons.</p>
+        </body></html>
+        """,
+    )
+
+    entries = parse_emails(
+        [email],
+        llm=MalformedStructuredEmailClient(),
+        llm_structure_non_scholar=True,
+    )
+
+    assert len(entries) == 1
+    assert entries[0].url == "https://example.org/article"
+
+
+def test_elsevier_click_tracking_url_is_not_used_as_article_image():
+    email = EmailMessage(
+        id="elsevier-tracking-image",
+        thread_id="t",
+        subject="Journal recommendations",
+        sender="ScienceDirect <sciencedirect@notification.elsevier.com>",
+        date=None,
+        html="""
+        <html><body>
+          <a href="https://example.org/paper">
+            Machine-learning potentials for thermal transport in porous materials
+          </a>
+          <img src="http://click.notification.elsevier.com/CI0/tracking-redirect">
+        </body></html>
+        """,
+    )
+
+    entries = parse_email(email)
+
+    assert len(entries) == 1
+    assert entries[0].image_paths == []

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import re
 from datetime import datetime
 from email.utils import parsedate_to_datetime
@@ -21,6 +22,10 @@ class GmailAuthenticationError(RuntimeError):
     pass
 
 
+class GmailConnectionError(RuntimeError):
+    pass
+
+
 class GmailClient:
     def __init__(self, config: dict[str, Any], *, base_dir: Path | None = None) -> None:
         self.config = config
@@ -37,12 +42,34 @@ class GmailClient:
     def token_path(self) -> Path:
         return self._resolve(self.gmail_config.get("token_path", "token.json"))
 
+    def reauthorize(self) -> Path:
+        try:
+            from google_auth_oauthlib.flow import InstalledAppFlow
+        except ImportError as exc:  # pragma: no cover - depends on user env
+            raise GmailDependencyError(
+                "Google Gmail dependencies are missing. Install with `python -m pip install -e .`."
+            ) from exc
+
+        if self.token_path.exists():
+            backup_path = self.token_path.with_name(
+                f"{self.token_path.stem}.backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}{self.token_path.suffix}"
+            )
+            self.token_path.rename(backup_path)
+
+        try:
+            creds = self._authorize_with_browser(InstalledAppFlow)
+        except (OSError, TimeoutError) as exc:
+            raise GmailConnectionError(_connection_error_message("authorizing Gmail OAuth")) from exc
+        self.token_path.write_text(creds.to_json(), encoding="utf-8")
+        self._service = None
+        return self.token_path
+
     def fetch_unread_emails(self, *, max_results: int | None = None) -> list[EmailMessage]:
         service = self._get_service()
         query = self.gmail_config.get("query", "is:unread")
         limit = max_results or int(self.gmail_config.get("max_emails_per_run", 50))
         include_spam_trash = bool(self.gmail_config.get("include_spam_trash", False))
-        response = (
+        request = (
             service.users()
             .messages()
             .list(
@@ -51,19 +78,19 @@ class GmailClient:
                 maxResults=limit,
                 includeSpamTrash=include_spam_trash,
             )
-            .execute()
         )
+        response = self._execute(request, "searching unread Gmail messages")
         messages = response.get("messages", [])
         return [self.fetch_email(message["id"]) for message in messages]
 
     def fetch_email(self, message_id: str) -> EmailMessage:
         service = self._get_service()
-        message = (
+        request = (
             service.users()
             .messages()
             .get(userId="me", id=message_id, format="full")
-            .execute()
         )
+        message = self._execute(request, f"fetching Gmail message {message_id}")
         headers = {
             header["name"].lower(): header.get("value", "")
             for header in message.get("payload", {}).get("headers", [])
@@ -107,11 +134,12 @@ class GmailClient:
             return
         service = self._get_service()
         for message_id in message_ids:
-            service.users().messages().modify(
+            request = service.users().messages().modify(
                 userId="me",
                 id=message_id,
                 body={"removeLabelIds": ["UNREAD"]},
-            ).execute()
+            )
+            self._execute(request, f"marking Gmail message {message_id} as read")
 
     def _get_service(self):
         if self._service is not None:
@@ -120,8 +148,10 @@ class GmailClient:
             from google.auth.transport.requests import Request
             from google.auth.exceptions import RefreshError
             from google.oauth2.credentials import Credentials
+            from google_auth_httplib2 import AuthorizedHttp
             from google_auth_oauthlib.flow import InstalledAppFlow
             from googleapiclient.discovery import build
+            import httplib2
         except ImportError as exc:  # pragma: no cover - depends on user env
             raise GmailDependencyError(
                 "Google Gmail dependencies are missing. Install with `python -m pip install -e .`."
@@ -140,10 +170,14 @@ class GmailClient:
                             "Gmail OAuth token refresh failed. Check network connectivity and OAuth configuration."
                         ) from exc
                     creds = None
+                except (OSError, TimeoutError) as exc:
+                    raise GmailConnectionError(_connection_error_message("refreshing Gmail OAuth token")) from exc
             if not creds or not creds.valid:
                 creds = self._authorize_with_browser(InstalledAppFlow)
             self.token_path.write_text(creds.to_json(), encoding="utf-8")
-        self._service = build("gmail", "v1", credentials=creds)
+        timeout_seconds = int(self.gmail_config.get("request_timeout_seconds", 30))
+        http = httplib2.Http(timeout=timeout_seconds, proxy_info=_proxy_info(httplib2, self.gmail_config))
+        self._service = build("gmail", "v1", http=AuthorizedHttp(creds, http=http))
         return self._service
 
     def _authorize_with_browser(self, installed_app_flow):
@@ -151,6 +185,14 @@ class GmailClient:
             raise FileNotFoundError(f"Gmail credentials not found: {self.credentials_path}")
         flow = installed_app_flow.from_client_secrets_file(str(self.credentials_path), GMAIL_SCOPES)
         return flow.run_local_server(port=0)
+
+    def _execute(self, request, action: str) -> dict[str, Any]:
+        try:
+            return request.execute()
+        except TimeoutError as exc:
+            raise GmailConnectionError(_connection_error_message(action)) from exc
+        except OSError as exc:
+            raise GmailConnectionError(_connection_error_message(action, detail=str(exc))) from exc
 
     def _walk_parts(
         self,
@@ -214,13 +256,13 @@ class GmailClient:
         if not attachment_id:
             return b""
         service = self._get_service()
-        attachment = (
+        request = (
             service.users()
             .messages()
             .attachments()
             .get(userId="me", messageId=message_id, id=attachment_id)
-            .execute()
         )
+        attachment = self._execute(request, f"fetching Gmail attachment {attachment_id}")
         return _decode_body_bytes(attachment.get("data", ""))
 
     def _image_dir(self) -> Path:
@@ -283,6 +325,34 @@ def _is_google_scholar_headers(sender: str, subject: str) -> bool:
 def _is_invalid_grant_error(exc: BaseException) -> bool:
     text = " ".join(str(part) for part in (getattr(exc, "args", None) or [exc])).lower()
     return "invalid_grant" in text or "expired or revoked" in text
+
+
+def _connection_error_message(action: str, detail: str | None = None) -> str:
+    message = (
+        f"Gmail connection failed while {action}. "
+        "Check network access to Google/Gmail API, VPN or proxy settings, then retry. "
+        "For local-only verification, run `文献 --dry-run --sample`."
+    )
+    if detail:
+        message += f" Detail: {detail}"
+    return message
+
+
+def _proxy_info(httplib2_module, gmail_config: dict[str, Any]):
+    proxy_url = (
+        gmail_config.get("proxy_url")
+        or os.environ.get("https_proxy")
+        or os.environ.get("HTTPS_PROXY")
+        or os.environ.get("CODEX_PROXY_URL")
+        or os.environ.get("http_proxy")
+        or os.environ.get("HTTP_PROXY")
+        or os.environ.get("CODEX_ALL_PROXY_URL")
+    )
+    if not proxy_url:
+        return None
+
+    noproxy = os.environ.get("no_proxy") or os.environ.get("NO_PROXY") or os.environ.get("CODEX_NO_PROXY")
+    return httplib2_module.proxy_info_from_url(proxy_url, "https", noproxy=noproxy)
 
 
 def _is_likely_toc_image(filename: str, headers: dict[str, str]) -> bool:

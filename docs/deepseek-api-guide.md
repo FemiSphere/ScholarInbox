@@ -2,13 +2,14 @@
 
 本文说明如何把本项目的 LLM 后端从 Codex CLI 切换到 DeepSeek API，目标是让文献摘要任务更便宜、更快、更稳定。
 
-本文依据 DeepSeek 中文 API 文档整理，查阅日期：2026-04-29。价格、模型名和政策可能变化，正式充值前请再看一次官方文档。
+本文依据 DeepSeek 中文 API 文档整理，最近核对日期：2026-08-20。价格、模型名和政策可能变化，正式充值前请再看一次官方文档。
 
 官方入口：
 
 - DeepSeek API 文档：https://api-docs.deepseek.com/zh-cn/
 - 首次调用 API：https://api-docs.deepseek.com/zh-cn/
 - 模型与价格：https://api-docs.deepseek.com/zh-cn/quick_start/pricing
+- 限速与隔离：https://api-docs.deepseek.com/zh-cn/quick_start/rate_limit
 - JSON Output：https://api-docs.deepseek.com/zh-cn/guides/json_mode
 - 思考模式：https://api-docs.deepseek.com/zh-cn/guides/thinking_mode
 
@@ -149,7 +150,7 @@ DeepSeek 文档说明上下文硬盘缓存默认开启，不需要改代码。�
 
 ### 限速和排队
 
-DeepSeek 会根据负载动态限制并发。达到限制时可能返回 HTTP 429。请求发出后，如果服务器排队，连接可能保持一段时间。
+DeepSeek 按账号限制并发，超过限制会返回 HTTP 429。请求发出后，如果服务器排队，连接可能保持一段时间。平台允许的并发上限不等于本项目应采用的并发数；邮件正文和排序批次的请求体较大，后续如增加并发，应先从 2–4 个请求开始测量延迟、错误率和 token 用量。
 
 本项目建议：
 
@@ -331,3 +332,5 @@ digest:
 - `config/llm/deepseek.example.yaml`：DeepSeek 模板
 - `config/llm/deepseek.local.yaml`：你的 DeepSeek 本地配置，已忽略
 - `.env`：保存 `DEEPSEEK_API_KEY`
+
+当前代码中的 LLM 调用顺序、日志证据和仅供后续评估的优化方向见 [`architecture-and-performance.md`](architecture-and-performance.md)。

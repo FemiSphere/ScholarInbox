@@ -1,186 +1,175 @@
-# ScholarPulse：把学术邮件整理成中文文献摘要
+# ScholarPulse：把学术提醒邮件整理成中文文献摘要
 
-ScholarPulse 是一个轻量级本地 Python 工作流，用来从 Google Scholar alerts、期刊目录提醒、出版社推荐邮件和 RSS 邮件中提取论文条目，去重、排序、翻译并生成中文 Markdown 与 HTML 摘要。
+ScholarPulse 是一个本地 Python 工作流：从专用 Gmail 邮箱读取 Google Scholar alerts、期刊目录、出版社推荐和 RSS 邮件，提取论文条目，去重并调用 LLM 完成中文翻译、摘要和相关性排序，最后生成 Markdown 与 HTML 阅读页。
 
-它适合希望用成熟邮件订阅源跟踪文献，而不想维护个人爬虫或复杂数据库的科研用户。
+它的目标不是替代论文精读，而是把分散、重复的学术提醒先整理成一份可以快速筛选的阅读清单。
 
-## 核心功能
+## 当前能力
 
-- 读取专用 Gmail 学术邮箱中的未读提醒邮件。
-- 解析 Google Scholar 关键词提醒、作者提醒、期刊目录邮件、RSS 邮件和通用学术推荐邮件。
-- 按 DOI、URL、规范化标题和模糊标题相似度去重。
-- 根据 `research_interests.md` 中的自然语言研究兴趣动态判断相关性。
-- 调用 Codex CLI、DeepSeek 或其他 OpenAI-compatible API 生成中文标题、摘要和推荐理由。
-- 同时输出 Markdown 与 HTML；HTML 支持浏览器阅读、图片展示、搜索和相关性筛选。
-- 默认 dry-run，不删除邮件，不标记已读，适合先安全试跑。
+- 读取 Gmail 未读邮件；不会删除邮件。
+- 解析 Google Scholar 和常见期刊/出版社邮件；非 Scholar 邮件可先由 LLM 做结构化抽取。
+- 按 DOI、规范化 URL、标题和模糊标题相似度去重，并过滤近期 digest 中已出现的论文。
+- 从 `research_interests.md` 提炼近期研究兴趣，据此生成高、中、低相关性和中文推荐理由。
+- 支持 Codex CLI 与 OpenAI-compatible API；当前示例包含 DeepSeek 配置。
+- 同时输出 Markdown 与 HTML；HTML 支持搜索、相关性筛选、详情折叠和可用的 TOC 图片。
+- 支持 dry-run、样例数据、Gmail OAuth 重新授权、可配置代理和运行日志。
 
-## 快速开始
+## 工作流
 
-### 1. 安装依赖
-
-```powershell
-python -m pip install -e ".[dev]"
+```text
+Gmail 学术提醒
+  -> 邮件过滤
+  -> 论文条目解析
+  -> DOI / URL / 标题去重
+  -> 读取并提炼近期研究兴趣
+  -> LLM 分批排序、翻译和摘要
+  -> Markdown + HTML
+  -> 可选：成功后标记邮件已读
 ```
 
-### 2. 准备本地配置
+实现边界、关键模块和当前性能分析见 [`docs/architecture-and-performance.md`](docs/architecture-and-performance.md)。
+
+## 安装
+
+需要 Python 3.10 或更高版本。
+
+```bash
+python -m pip install -e ".[dev]"
+cp config.example.yaml config.local.yaml
+```
+
+Windows PowerShell 可将第二条命令替换为：
 
 ```powershell
 Copy-Item config.example.yaml config.local.yaml
 ```
 
-只修改 `config.local.yaml`。该文件已被 `.gitignore` 忽略，不应提交到 Git。
+只修改 `config.local.yaml`。本地配置、OAuth 文件、密钥、运行数据、输出和日志均不应提交到 Git。
 
-### 3. 配置 Gmail OAuth
+## Gmail OAuth
 
-在 Google Cloud Console 中启用 Gmail API，创建 Desktop App 类型 OAuth Client，下载凭据并命名为：
+1. 在 Google Cloud Console 启用 Gmail API。
+2. 创建 Desktop App 类型的 OAuth Client。
+3. 下载凭据并命名为 `credentials.json`，放在项目根目录。
+4. 第一次读取 Gmail 时，浏览器会打开授权页，成功后生成 `token.json`。
 
-```text
-credentials.json
+授权失效或更换账号时运行：
+
+```bash
+python -m literature_digest --reauth-gmail
 ```
 
-放到项目根目录。第一次读取 Gmail 时，程序会打开浏览器完成授权，并生成 `token.json`。
-
-不要提交 `credentials.json`、`token.json`、`.env`、`config.local.yaml` 或 `config/llm/*.local.yaml`。
-
-### 4. 写研究兴趣
-
-编辑：
-
-```text
-research_interests.md
-```
-
-可以直接写自然语言，例如：
-
-```markdown
-我近期关注计算材料科学与 AI for materials，特别是框架材料、二维材料、机器学习势函数、声子输运、热导率预测，以及可能启发材料设计的新计算方法。
-```
-
-程序会让 LLM 从这段文字中提炼结构化兴趣画像，再用于论文排序。
-
-### 5. 先运行样例
-
-```powershell
-python -m literature_digest --dry-run --sample
-```
-
-### 6. 小批量读取真实 Gmail
-
-```powershell
-python -m literature_digest --dry-run --max-emails 5
-```
-
-输出文件会生成到：
-
-```text
-outputs/
-```
-
-确认效果稳定后，再逐步提高 `--max-emails`。
+旧 token 会先备份为 `token.backup-YYYYMMDD-HHMMSS.json`。网络、代理和 macOS/Windows 快捷运行说明见 [`docs/automation-and-shortcuts.md`](docs/automation-and-shortcuts.md)。
 
 ## LLM 配置
 
-主配置中只选择后端：
+主配置只引用一个独立的 LLM 配置文件：
 
 ```yaml
 llm:
-  provider: "openai_compatible"
   config_path: "config/llm/deepseek.local.yaml"
 ```
 
-DeepSeek 示例配置可参考：
+可用模板：
 
-```text
-config/llm/deepseek.example.yaml
+- `config/llm/codex_cli.example.yaml`
+- `config/llm/deepseek.example.yaml`
+
+使用 API 时，把真实 key 写入 `.env`，YAML 中只保留环境变量名：
+
+```env
+DEEPSEEK_API_KEY=your_api_key
 ```
 
-复制为本地文件：
+DeepSeek 参数和 JSON 输出约束见 [`docs/deepseek-api-guide.md`](docs/deepseek-api-guide.md)。
 
-```powershell
-Copy-Item config/llm/deepseek.example.yaml config/llm/deepseek.local.yaml
+## 研究兴趣
+
+直接编辑 `research_interests.md`，用自然语言描述当前项目、材料体系、方法、物性和不关心的方向。程序每次有候选论文时都会调用一次 LLM，将这份文本提炼为结构化兴趣画像。
+
+示例：
+
+```markdown
+我近期关注五边形框架材料的理论设计与物性研究，尤其是 COF/MOF/HOF、
+机器学习势函数、声子与热输运，以及 AI 辅助材料结构设计。
 ```
 
-API key 建议写入 `.env`：
+## 运行
 
-```text
-DEEPSEEK_API_KEY=your_deepseek_api_key
-```
+先用内置样例验证本地链路；该命令不读取 Gmail，也不需要 LLM API key：
 
-低成本快速处理可优先选择 `deepseek-v4-flash`。更详细说明见 [docs/deepseek-api-guide.md](docs/deepseek-api-guide.md)。
-
-如果使用 Codex CLI，可参考：
-
-```text
-config/llm/codex_cli.example.yaml
-```
-
-## 常用命令
-
-```powershell
-# 样例数据，不需要 Gmail 凭据
+```bash
 python -m literature_digest --dry-run --sample
-
-# 读取最多 10 封未读邮件
-python -m literature_digest --dry-run --max-emails 10
-
-# 静默运行
-python -m literature_digest --dry-run --max-emails 50 --quiet
-
-# 明确使用本地配置
-python -m literature_digest --config config.local.yaml --dry-run --max-emails 20
 ```
 
-正式运行时如需标记已读，需要同时满足：
+再小批量读取真实邮箱：
+
+```bash
+python -m literature_digest --dry-run --max-emails 5
+```
+
+常用参数：
+
+```text
+--config PATH       指定主配置文件
+--max-emails N      覆盖单次读取邮件数
+--date YYYY-MM-DD   指定输出日期标签
+--quiet             隐藏进度信息
+--reauth-gmail      强制重新进行 Gmail OAuth
+```
+
+正式标记已读必须同时满足：
 
 - `config.local.yaml` 中 `gmail.mark_as_read: true`
 - 命令行使用 `--no-dry-run`
 
-项目不会删除邮件。
+项目不会删除邮件。输出写入 `outputs/`，日志写入 `logs/`。
 
-## 自动化与一键运行
+## 一键运行
 
-Windows 一键运行脚本：
+macOS：
+
+```bash
+scripts/run_digest_macos.sh --dry-run --sample
+```
+
+Windows：
 
 ```text
 scripts/run_digest.bat
 scripts/run_digest.ps1
 ```
 
-双击 `scripts/run_digest.bat` 会自动定位项目根目录，运行摘要任务，并把日志写入 `logs/`。
+脚本会从自身位置定位项目根目录，因此仓库移动后通常不需要修改脚本内部路径。
 
-定时运行和桌面快捷方式说明见：
+## 测试与提交前检查
 
-```text
-docs/automation-and-shortcuts.md
+```bash
+python -m pytest
+python -m literature_digest --dry-run --sample
 ```
+
+确认命令成功，并确认 `outputs/` 中生成了新的 Markdown digest。
 
 ## 安全约定
 
-已忽略的本地敏感文件包括：
+以下文件或目录必须留在本地：
 
 - `.env`
-- `config.local.yaml`
+- `config.local.yaml` 及其备份
 - `config/llm/*.local.yaml`
 - `credentials.json`
-- `token.json`
+- `token.json` 及其备份
+- `Gmail_oauth*.md`
 - `data/`
 - `outputs/`
 - `logs/`
 
-日志和异常信息不应打印 API key、OAuth token、refresh token 或邮箱凭据。
+错误信息和日志不得打印 API key、OAuth token、refresh token 或邮箱凭据。
 
-## 测试
+## 当前边界
 
-```powershell
-python -m pytest
-```
-
-建议在提交前同时运行：
-
-```powershell
-python -m literature_digest --dry-run --sample
-```
-
-## 项目状态
-
-这是一个面向个人科研工作流的早期项目。它的目标不是替代完整论文阅读，而是把散落在邮箱中的学术提醒整理成更容易浏览、筛选和追踪的中文摘要。
+- 邮件格式适配仍是启发式与 LLM 结构化抽取的组合，不保证覆盖所有出版社模板。
+- 排序依据标题、来源、邮件片段和可见元数据，不等同于阅读全文后的学术评价。
+- 当前 LLM 请求是串行执行的；大批量邮件的延迟主要随待处理邮件数和候选论文数增长。
+- 邮件回发尚未实现；当前完成的是本地 Markdown/HTML 输出和可选的已读标记。

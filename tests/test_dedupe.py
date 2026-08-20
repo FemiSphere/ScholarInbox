@@ -40,3 +40,9 @@ def test_dedupe_can_filter_against_existing_entries():
 def test_normalizers():
     assert normalize_title("  A Study: Thermal-Conductivity! ") == "a study thermal conductivity"
     assert canonicalize_url("HTTPS://Example.org/A/?utm_source=x&keep=1#frag") == "https://example.org/A?keep=1"
+
+
+def test_canonicalize_url_tolerates_malformed_bracketed_url():
+    malformed = "https://www.apple.com... 阅读更多内容 | [链接](https://click.example.org/article"
+
+    assert canonicalize_url(malformed) == malformed.lower()

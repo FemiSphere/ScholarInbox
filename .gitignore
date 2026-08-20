@@ -1,8 +1,10 @@
+.DS_Store
 config.local.yaml
 config.local.yaml*
 config/llm/*.local.yaml
 credentials.json
 token.json
+token.backup-*.json
 Gmail_oauth*.md
 .env
 data/

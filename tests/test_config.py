@@ -2,6 +2,7 @@ from pathlib import Path
 
 from literature_digest.config import load_config
 from literature_digest.llm import LLMError
+from literature_digest.llm.base import extract_json_object
 from literature_digest.llm.openai_compatible import OpenAICompatibleClient
 
 
@@ -82,4 +83,40 @@ def test_openai_compatible_complete_json_retries_non_json_response():
     payload = client.complete_json("Return JSON.")
 
     assert payload == {"ok": True}
+    assert client.calls == 2
+
+
+class RetryMalformedJSONClient(OpenAICompatibleClient):
+    def __init__(self):
+        super().__init__(
+            base_url="https://api.deepseek.com",
+            api_key_env="DEEPSEEK_API_KEY",
+            model="deepseek-v4-flash",
+        )
+        self.calls = 0
+
+    def complete(self, prompt: str) -> str:
+        self.calls += 1
+        if self.calls == 1:
+            return '{"papers": [{"title": "Broken" "url": "https://example.com"}]}'
+        return '{"papers": []}'
+
+
+def test_extract_json_object_wraps_malformed_sliced_json():
+    try:
+        extract_json_object('prefix {"papers": [{"title": "Broken" "url": "https://example.com"}]} suffix')
+    except LLMError as exc:
+        message = str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("Expected LLMError")
+
+    assert "malformed JSON object" in message
+
+
+def test_openai_compatible_complete_json_retries_malformed_json_response():
+    client = RetryMalformedJSONClient()
+
+    payload = client.complete_json("Return JSON.")
+
+    assert payload == {"papers": []}
     assert client.calls == 2

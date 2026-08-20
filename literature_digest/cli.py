@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -11,7 +12,7 @@ from .dedupe import deduplicate_entries
 from .digest import write_digests
 from .email_filter import classify_email
 from .env import load_dotenv_file
-from .gmail_client import GmailClient
+from .gmail_client import GmailConnectionError, GmailClient
 from .interests import analyze_research_interests, fallback_interest_profile, read_research_interests
 from .llm import build_llm_client
 from .models import DigestRun, RunStats, SkippedEmail
@@ -36,6 +37,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_emails is not None:
         config["gmail"]["max_emails_per_run"] = args.max_emails
 
+    if args.reauth_gmail:
+        progress.step("开始重新授权 Gmail OAuth")
+        gmail = GmailClient(config, base_dir=base_dir)
+        try:
+            token_path = gmail.reauthorize()
+        except GmailConnectionError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+        progress.done(f"Gmail OAuth 重新授权完成：{token_path}")
+        return 0
+
     sample_mode, warnings = _should_use_sample(args, config, dry_run, base_dir)
     progress.step("初始化完成")
     llm = build_llm_client(config, sample_mode=sample_mode)
@@ -49,7 +61,11 @@ def main(argv: list[str] | None = None) -> int:
             f"max={config['gmail']['max_emails_per_run']}"
         )
         gmail = GmailClient(config, base_dir=base_dir)
-        emails = gmail.fetch_unread_emails(max_results=config["gmail"]["max_emails_per_run"])
+        try:
+            emails = gmail.fetch_unread_emails(max_results=config["gmail"]["max_emails_per_run"])
+        except GmailConnectionError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
     progress.step(f"邮件读取完成：{len(emails)} 封")
 
     skipped: list[SkippedEmail] = []
@@ -171,7 +187,11 @@ def main(argv: list[str] | None = None) -> int:
     if not dry_run and not sample_mode and config["gmail"].get("mark_as_read", False):
         progress.step(f"标记已处理邮件为已读：{len(accepted)} 封")
         gmail = GmailClient(config, base_dir=base_dir)
-        gmail.mark_as_read([email.id for email in accepted])
+        try:
+            gmail.mark_as_read([email.id for email in accepted])
+        except GmailConnectionError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
 
     progress.done("运行完成")
     print("Digest written:")
@@ -197,6 +217,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sample", action="store_true", help="Use built-in sample emails.")
     parser.add_argument("--date", help="Override output date label, e.g. 2026-04-28.")
     parser.add_argument("--quiet", action="store_true", help="Suppress progress messages.")
+    parser.add_argument("--reauth-gmail", action="store_true", help="Force Gmail OAuth reauthorization.")
     return parser
 
 

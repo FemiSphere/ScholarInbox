@@ -44,6 +44,7 @@ def test_write_digests_creates_markdown_and_html(tmp_path):
     assert tmp_path / "2026-04-28-digest.md" in paths
     assert tmp_path / "2026-04-28-digest.html" in paths
     html = (tmp_path / "2026-04-28-digest.html").read_text(encoding="utf-8")
+    assert (tmp_path / "2026-04-28-digest.html").read_bytes().startswith(b"\xef\xbb\xbf")
     assert "科研文献摘要" in html
     assert "每日科研文献摘要" not in html
     assert 'data-filter="high"' in html
@@ -52,6 +53,7 @@ def test_write_digests_creates_markdown_and_html(tmp_path):
     assert "toc.png" in html
     assert "https://example.org/paper" in html
     assert "英文原题：Thermal conductivity in pentagonal COF nanotubes" in html
+    assert "naturalWidth <= 4" in html
 
 
 def test_digest_does_not_show_english_title_as_chinese_title(tmp_path):

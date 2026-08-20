@@ -38,10 +38,22 @@ def extract_json_object(text: str) -> dict[str, Any]:
 
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
     if fenced:
-        return json.loads(fenced.group(1))
+        try:
+            parsed = json.loads(fenced.group(1))
+        except json.JSONDecodeError as exc:
+            raise LLMError(f"LLM response contained malformed fenced JSON: {exc}") from exc
+        if isinstance(parsed, dict):
+            return parsed
+        raise LLMError("LLM response fenced JSON was not an object.")
 
     start = text.find("{")
     end = text.rfind("}")
     if start >= 0 and end > start:
-        return json.loads(text[start : end + 1])
+        try:
+            parsed = json.loads(text[start : end + 1])
+        except json.JSONDecodeError as exc:
+            raise LLMError(f"LLM response contained malformed JSON object: {exc}") from exc
+        if isinstance(parsed, dict):
+            return parsed
+        raise LLMError("LLM response JSON was not an object.")
     raise LLMError("LLM response did not contain a JSON object.")

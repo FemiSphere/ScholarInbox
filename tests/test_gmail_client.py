@@ -5,10 +5,12 @@ from types import ModuleType
 
 import pytest
 
-from literature_digest.gmail_client import GMAIL_SCOPES, GmailAuthenticationError, GmailClient
+from literature_digest.gmail_client import GMAIL_SCOPES, GmailAuthenticationError, GmailConnectionError, GmailClient
 
 
 def test_invalid_grant_refresh_starts_new_browser_authorization(tmp_path, monkeypatch):
+    _clear_proxy_env(monkeypatch)
+
     class FakeRefreshError(Exception):
         pass
 
@@ -48,10 +50,10 @@ def test_invalid_grant_refresh_starts_new_browser_authorization(tmp_path, monkey
     captured = {}
     service = object()
 
-    def fake_build(api_name, version, credentials):
+    def fake_build(api_name, version, **kwargs):
         captured["api_name"] = api_name
         captured["version"] = version
-        captured["credentials"] = credentials
+        captured["http"] = kwargs["http"]
         return service
 
     _install_fake_google_modules(
@@ -73,7 +75,45 @@ def test_invalid_grant_refresh_starts_new_browser_authorization(tmp_path, monkey
     assert captured["port"] == 0
     assert captured["api_name"] == "gmail"
     assert captured["version"] == "v1"
-    assert isinstance(captured["credentials"], FreshCredentials)
+    assert isinstance(captured["http"].credentials, FreshCredentials)
+    assert captured["http"].http.timeout == 30
+    assert captured["http"].http.proxy_info is None
+
+
+def test_gmail_service_uses_proxy_from_environment(tmp_path, monkeypatch):
+    class ValidCredentials:
+        valid = True
+        expired = False
+        refresh_token = "refresh-token"
+
+        @classmethod
+        def from_authorized_user_file(cls, path, scopes):
+            return cls()
+
+    captured = {}
+
+    def fake_build(api_name, version, **kwargs):
+        captured["http"] = kwargs["http"]
+        return object()
+
+    _install_fake_google_modules(
+        monkeypatch,
+        credentials_cls=ValidCredentials,
+        flow_cls=object,
+        refresh_error_cls=Exception,
+        build_fn=fake_build,
+    )
+    monkeypatch.setenv("CODEX_PROXY_URL", "http://127.0.0.1:7897")
+    monkeypatch.setenv("CODEX_NO_PROXY", "localhost,127.0.0.1")
+    (tmp_path / "token.json").write_text("token", encoding="utf-8")
+
+    GmailClient(_config(), base_dir=tmp_path)._get_service()
+
+    assert captured["http"].http.proxy_info == {
+        "url": "http://127.0.0.1:7897",
+        "method": "https",
+        "noproxy": "localhost,127.0.0.1",
+    }
 
 
 def test_non_invalid_refresh_error_is_not_silently_reauthorized(tmp_path, monkeypatch):
@@ -113,11 +153,92 @@ def test_non_invalid_refresh_error_is_not_silently_reauthorized(tmp_path, monkey
         client._get_service()
 
 
+def test_fetch_unread_timeout_has_actionable_error(tmp_path, monkeypatch):
+    class ValidCredentials:
+        valid = True
+        expired = False
+        refresh_token = "refresh-token"
+
+        @classmethod
+        def from_authorized_user_file(cls, path, scopes):
+            return cls()
+
+    class TimeoutRequest:
+        def execute(self):
+            raise TimeoutError("timed out")
+
+    class FakeMessages:
+        def list(self, **kwargs):
+            return TimeoutRequest()
+
+    class FakeUsers:
+        def messages(self):
+            return FakeMessages()
+
+    class FakeService:
+        def users(self):
+            return FakeUsers()
+
+    _install_fake_google_modules(
+        monkeypatch,
+        credentials_cls=ValidCredentials,
+        flow_cls=object,
+        refresh_error_cls=Exception,
+        build_fn=lambda *args, **kwargs: FakeService(),
+    )
+    (tmp_path / "token.json").write_text("token", encoding="utf-8")
+
+    client = GmailClient(_config(), base_dir=tmp_path)
+
+    with pytest.raises(GmailConnectionError, match="文献 --dry-run --sample"):
+        client.fetch_unread_emails(max_results=1)
+
+
+def test_reauthorize_backs_up_existing_token_and_writes_new_token(tmp_path, monkeypatch):
+    class FreshCredentials:
+        def to_json(self):
+            return '{"authorized": true}'
+
+    class FakeInstalledAppFlow:
+        @classmethod
+        def from_client_secrets_file(cls, path, scopes):
+            captured["credentials_path"] = path
+            captured["scopes"] = scopes
+            return cls()
+
+        def run_local_server(self, port):
+            captured["port"] = port
+            return FreshCredentials()
+
+    captured = {}
+    _install_fake_google_modules(
+        monkeypatch,
+        credentials_cls=object,
+        flow_cls=FakeInstalledAppFlow,
+        refresh_error_cls=Exception,
+        build_fn=lambda *args, **kwargs: object(),
+    )
+    (tmp_path / "credentials.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "token.json").write_text("old-token", encoding="utf-8")
+
+    token_path = GmailClient(_config(), base_dir=tmp_path).reauthorize()
+
+    assert token_path == tmp_path / "token.json"
+    assert token_path.read_text(encoding="utf-8") == '{"authorized": true}'
+    backups = list(tmp_path.glob("token.backup-*.json"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == "old-token"
+    assert captured["credentials_path"] == str(tmp_path / "credentials.json")
+    assert captured["scopes"] == GMAIL_SCOPES
+    assert captured["port"] == 0
+
+
 def _config():
     return {
         "gmail": {
             "credentials_path": "credentials.json",
             "token_path": "token.json",
+            "request_timeout_seconds": 30,
         },
         "parsing": {},
     }
@@ -139,18 +260,36 @@ def _install_fake_google_modules(
     oauth2_module = _package("google.oauth2")
     credentials_module = ModuleType("google.oauth2.credentials")
     oauthlib_module = _package("google_auth_oauthlib")
+    auth_httplib2_module = ModuleType("google_auth_httplib2")
     flow_module = ModuleType("google_auth_oauthlib.flow")
     api_client_module = _package("googleapiclient")
     discovery_module = ModuleType("googleapiclient.discovery")
+    httplib2_module = ModuleType("httplib2")
 
     class FakeRequest:
         pass
 
+    class FakeAuthorizedHttp:
+        def __init__(self, credentials, http):
+            self.credentials = credentials
+            self.http = http
+
+    class FakeHttp:
+        def __init__(self, timeout=None, proxy_info=None):
+            self.timeout = timeout
+            self.proxy_info = proxy_info
+
+    def fake_proxy_info_from_url(url, method="http", noproxy=None):
+        return {"url": url, "method": method, "noproxy": noproxy}
+
     requests_module.Request = FakeRequest
     exceptions_module.RefreshError = refresh_error_cls
     credentials_module.Credentials = credentials_cls
+    auth_httplib2_module.AuthorizedHttp = FakeAuthorizedHttp
     flow_module.InstalledAppFlow = flow_cls
     discovery_module.build = build_fn
+    httplib2_module.Http = FakeHttp
+    httplib2_module.proxy_info_from_url = fake_proxy_info_from_url
 
     google_module.auth = auth_module
     auth_module.transport = transport_module
@@ -169,10 +308,12 @@ def _install_fake_google_modules(
         exceptions_module,
         oauth2_module,
         credentials_module,
+        auth_httplib2_module,
         oauthlib_module,
         flow_module,
         api_client_module,
         discovery_module,
+        httplib2_module,
     ):
         monkeypatch.setitem(sys.modules, module.__name__, module)
 
@@ -181,3 +322,20 @@ def _package(name: str) -> ModuleType:
     module = ModuleType(name)
     module.__path__ = []
     return module
+
+
+def _clear_proxy_env(monkeypatch) -> None:
+    for name in (
+        "http_proxy",
+        "https_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "all_proxy",
+        "ALL_PROXY",
+        "no_proxy",
+        "NO_PROXY",
+        "CODEX_PROXY_URL",
+        "CODEX_ALL_PROXY_URL",
+        "CODEX_NO_PROXY",
+    ):
+        monkeypatch.delenv(name, raising=False)

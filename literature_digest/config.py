@@ -13,6 +13,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "include_spam_trash": False,
         "credentials_path": "credentials.json",
         "token_path": "token.json",
+        "request_timeout_seconds": 30,
+        "proxy_url": "",
     },
     "llm": {
         "provider": "codex_cli",

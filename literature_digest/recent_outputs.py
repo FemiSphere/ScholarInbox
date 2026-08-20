@@ -130,8 +130,15 @@ def _extract_original_title(body: str) -> str:
 
 
 def _extract_first_markdown_link(body: str) -> str:
-    match = MARKDOWN_LINK_RE.search(body)
-    return match.group(1).strip() if match else ""
+    marker = "]("
+    start = body.rfind(marker)
+    if start == -1:
+        return ""
+    url_start = start + len(marker)
+    url_end = body.find(")", url_start)
+    if url_end == -1:
+        return ""
+    return body[url_start:url_end].strip()
 
 
 def _first_ascii_title_char(value: str) -> int:

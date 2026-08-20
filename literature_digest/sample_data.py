@@ -39,7 +39,6 @@ def sample_emails() -> list[EmailMessage]:
             html="""
             <html><body>
               <h1>Table of Contents</h1>
-              <img src="data/toc_images/sample/sample_toc.png" alt="TOC graphic">
               <a href="https://doi.org/10.1234/example.2026.001">
                 Phonon-limited thermal conductivity in low-dimensional framework materials
               </a>
@@ -60,4 +59,3 @@ def sample_emails() -> list[EmailMessage]:
             snippet="Discount offer.",
         ),
     ]
-
