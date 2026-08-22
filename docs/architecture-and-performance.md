@@ -13,7 +13,7 @@
    - Google Scholar 邮件使用本地 HTML/文本规则。
    - 其他期刊、出版社和 RSS 邮件先压缩正文、链接和图片候选，再以最多 3 个 worker 调用 LLM；失败时回退到本地解析器。
 5. 按 DOI、URL、规范化标题和模糊标题相似度去重。
-6. 读取最近 Markdown digest，再次过滤近期已输出论文。
+6. 查询近 30 天 JSON 论文身份索引，按 DOI、arXiv ID、URL、完全标题和受保护的模糊标题过滤跨日期重复项。
 7. 按兴趣文本与模型配置哈希读取或更新研究兴趣画像。
 8. 默认每批 20 篇、最多 3 个 worker 调用 LLM，完成相关性、中文标题、摘要和推荐理由；结果按原始批次稳定合并后再按得分排序。
 9. 本地生成 Markdown 与 HTML。
@@ -30,7 +30,8 @@
 | `email_filter.py` | 邮件级过滤 |
 | `parsers.py` | 本地解析、prompt 压缩与非 Scholar 有限并发抽取 |
 | `dedupe.py` | DOI、URL、标题和模糊标题去重 |
-| `recent_outputs.py` | 从近期 Markdown 输出恢复论文身份用于跨次去重 |
+| `paper_registry.py` | 近 30 天 JSON 身份索引、候选分块、原子写入和首次回填 |
+| `recent_outputs.py` | 第一次启用 JSON 索引时，从近期 Markdown 恢复历史身份 |
 | `interests.py` | 研究兴趣读取、哈希缓存、LLM 提炼和本地回退 |
 | `ranking.py` | 可配置批大小与有限并发的排序、翻译和摘要 |
 | `telemetry.py` | 线程安全的 LLM/Gmail 请求指标；不保存 prompt 正文 |
@@ -102,6 +103,14 @@ OpenAI-compatible 客户端对 HTTP 429、500、502、503、504 和临时网络�
 
 dry-run 判断仍在调用已读标记之前；优化没有放宽“不删除邮件”或“不在 dry-run 修改邮件状态”的边界。
 
+### 4.6 近 30 天轻量 JSON 去重索引
+
+跨日期去重不再依赖每次扫描少量 Markdown 文件。程序把最近出现的论文身份保存在 `data/paper_registry.json`，启动时一次读取并建立 DOI、arXiv、URL、完全标题和标题 token 的内存索引。
+
+精确标识使用字典查询；只有精确匹配失败时才从共享标题 token 的小型候选集中执行 RapidFuzz。模糊匹配同时约束标题长度、token Jaccard、数字、化学式和 Part/Comment/Correction 等版本标记，避免 `token_set_ratio` 对包含关系的误判。
+
+索引按 `last_seen` 只保留近 30 天记录。正式运行在 Markdown/HTML 成功写出后原子更新 JSON；sample 和 dry-run 不写入。第一次启用时从近 30 天 Markdown 回填，之后记录所有成功解析的候选论文，而不只记录最终展示的论文。详细规则见 [`deduplication.md`](deduplication.md)。
+
 ## 5. 离线基准与批大小判断
 
 可复现命令：
@@ -128,7 +137,7 @@ python scripts/benchmark_performance.py
 
 ## 6. 验证与剩余瓶颈
 
-当前自动化测试覆盖：有限并发确实发生、并发后顺序稳定、缓存失效规则、prompt 页脚删除、usage/重试指标、Gmail batch 和 dry-run 原有边界。验证不调用真实 Gmail 或付费 LLM。
+当前自动化测试覆盖：有限并发、顺序稳定、缓存失效、prompt 页脚删除、usage/重试指标、Gmail batch、30 天索引清理、DOI/arXiv 别名、模糊误判保护和原子 JSON 写入。验证不调用真实 Gmail 或付费 LLM。
 
 剩余瓶颈主要是：
 

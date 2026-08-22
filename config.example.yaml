@@ -72,6 +72,17 @@ parsing:
   # 非 Google Scholar 的出版社/期刊/RSS 邮件，先用快速 LLM 抽取结构化论文条目。
   llm_structure_non_scholar: true
 
+deduplication:
+  # 使用轻量 JSON 身份索引进行跨日期去重；文件位于已忽略的 data/。
+  registry_enabled: true
+  registry_path: "data/paper_registry.json"
+  # 只保留最近 30 天内再次出现过的论文，避免索引持续增长。
+  retention_days: 30
+  # 历史模糊匹配比单次运行更保守，并带有长度、token 和数字保护。
+  fuzzy_title_threshold: 94
+  # 第一次启用时，从最近 30 天的 Markdown digest 回填身份索引。
+  bootstrap_from_outputs: true
+
 digest:
   output_dir: "outputs"
   output_formats:
@@ -84,11 +95,6 @@ digest:
   max_high_relevance: 20
   max_medium_relevance: 30
   max_low_relevance: 80
-  # 是否过滤最近已输出 digest 中出现过的论文，减少 Google Scholar 重复推送。
-  suppress_recent_output_duplicates: true
-  # 同时参考最近几天和最近几个 Markdown digest 文件；两者取并集。
-  recent_output_lookback_days: 5
-  recent_output_lookback_files: 5
 
 safety:
   dry_run_default: true

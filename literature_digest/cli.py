@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -23,8 +23,12 @@ from .interests import (
 from .llm import build_llm_client
 from .models import DigestRun, RunStats, SkippedEmail
 from .parsers import parse_emails
+from .paper_registry import (
+    PaperRegistry,
+    PaperRegistryError,
+    bootstrap_registry_from_markdown,
+)
 from .ranking import count_relevance, rank_papers
-from .recent_outputs import load_recent_output_entries
 from .sample_data import sample_emails
 from .telemetry import RunMetrics
 
@@ -117,34 +121,46 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     date_label = args.date or datetime.now().strftime("%Y-%m-%d")
+    registry_date = _registry_reference_date(date_label)
     candidate_entries = deduped.unique_entries
-    recent_duplicates_removed = 0
-    if not sample_mode and config["digest"].get("suppress_recent_output_duplicates", True):
-        history_entries, history_files = load_recent_output_entries(
-            _resolve_path(config["digest"]["output_dir"], base_dir),
-            date_label=date_label,
-            lookback_days=int(config["digest"].get("recent_output_lookback_days", 5)),
-            lookback_files=int(config["digest"].get("recent_output_lookback_files", 5)),
-        )
-        if history_files:
-            progress.step(
-                f"检查最近历史 digest 去重：读取 {len(history_files)} 个输出文件，"
-                f"识别 {len(history_entries)} 篇历史论文"
+    registry: PaperRegistry | None = None
+    registry_duplicates_removed = 0
+    dedupe_config = config.get("deduplication", {})
+    if not sample_mode and bool(dedupe_config.get("registry_enabled", True)):
+        try:
+            registry = PaperRegistry.load(
+                _resolve_path(dedupe_config.get("registry_path", "data/paper_registry.json"), base_dir),
+                reference_date=registry_date,
+                retention_days=int(dedupe_config.get("retention_days", 30)),
+                fuzzy_title_threshold=float(dedupe_config.get("fuzzy_title_threshold", 94)),
             )
-        if history_entries:
-            history_filtered = deduplicate_entries(
-                candidate_entries,
-                fuzzy_title_threshold=fuzzy_title_threshold,
-                existing_entries=history_entries,
+        except PaperRegistryError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+        if not registry.loaded_from_disk and bool(dedupe_config.get("bootstrap_from_outputs", True)):
+            history_files, history_entries = bootstrap_registry_from_markdown(
+                registry,
+                _resolve_path(config["digest"]["output_dir"], base_dir),
+                reference_date=registry_date,
             )
-            candidate_entries = history_filtered.unique_entries
-            recent_duplicates_removed = history_filtered.duplicates_removed
-            if recent_duplicates_removed:
-                warnings.append(
-                    f"最近历史输出过滤：参考最近 {len(history_files)} 个 digest 文件，"
-                    f"本次移除 {recent_duplicates_removed} 篇已输出论文。"
+            if history_files:
+                progress.step(
+                    f"JSON 去重索引首次回填：读取近 {registry.retention_days} 天 "
+                    f"{history_files} 个 Markdown，"
+                    f"识别 {history_entries} 条历史记录"
                 )
-                progress.step(f"历史输出去重完成：移除 {recent_duplicates_removed} 篇已输出论文")
+        registry_filtered = registry.filter_new(candidate_entries)
+        candidate_entries = registry_filtered.unique_entries
+        registry_duplicates_removed = registry_filtered.duplicates_removed
+        if registry_duplicates_removed:
+            reason_text = _format_duplicate_reasons(registry_filtered.reasons)
+            warnings.append(
+                f"近 {registry.retention_days} 天 JSON 身份索引移除 "
+                f"{registry_duplicates_removed} 篇重复论文（{reason_text}）。"
+            )
+            progress.step(
+                f"跨日期去重完成：移除 {registry_duplicates_removed} 篇（{reason_text}）"
+            )
 
     interests_path = _resolve_path(config["research_interests"]["path"], base_dir)
     interest_text = read_research_interests(interests_path)
@@ -181,8 +197,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         progress.step("LLM 排序和摘要完成")
     else:
-        if deduped.unique_entries and recent_duplicates_removed:
-            warnings.append("本次候选论文均已在最近历史 digest 中出现，因此生成空 digest。")
+        if deduped.unique_entries and registry_duplicates_removed:
+            retention_days = registry.retention_days if registry is not None else 30
+            warnings.append(
+                f"本次候选论文均已在近 {retention_days} 天 JSON 身份索引中出现，因此生成空 digest。"
+            )
         else:
             warnings.append("没有找到可处理的未读论文条目，本次生成空 digest。")
         interest_profile = fallback_interest_profile(interest_text)
@@ -195,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
         emails_read=len(emails),
         skipped_emails=len(skipped),
         paper_entries_extracted=len(entries),
-        duplicates_removed=deduped.duplicates_removed + recent_duplicates_removed,
+        duplicates_removed=deduped.duplicates_removed + registry_duplicates_removed,
         high_relevance=count_relevance(ranked, "high"),
         medium_relevance=count_relevance(ranked, "medium"),
         low_relevance=count_relevance(ranked, "low"),
@@ -216,6 +235,15 @@ def main(argv: list[str] | None = None) -> int:
         formats=list(config["digest"].get("output_formats", ["md", "html"])),
         overwrite_existing=bool(config["digest"].get("overwrite_existing", True)),
     )
+
+    if registry is not None and not dry_run:
+        progress.step(f"更新近 {registry.retention_days} 天 JSON 论文身份索引")
+        registry.record_entries(entries, seen_on=registry_date)
+        try:
+            registry.save(reference_date=registry_date)
+        except PaperRegistryError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
 
     if not dry_run and not sample_mode and config["gmail"].get("mark_as_read", False):
         progress.step(f"标记已处理邮件为已读：{len(accepted)} 封")
@@ -382,3 +410,21 @@ def _llm_cache_fingerprint(config: dict[str, Any]) -> str:
         ensure_ascii=False,
         sort_keys=True,
     )
+
+
+def _registry_reference_date(date_label: str) -> date:
+    try:
+        return date.fromisoformat(date_label)
+    except ValueError:
+        return date.today()
+
+
+def _format_duplicate_reasons(reasons: dict[str, int]) -> str:
+    labels = {
+        "doi": "DOI",
+        "arxiv": "arXiv",
+        "url": "URL",
+        "exact_title": "完全标题",
+        "fuzzy_title": "模糊标题",
+    }
+    return "，".join(f"{labels.get(reason, reason)} {count}" for reason, count in reasons.items())

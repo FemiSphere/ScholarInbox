@@ -64,6 +64,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "fuzzy_title_threshold": 92,
         "llm_structure_non_scholar": True,
     },
+    "deduplication": {
+        "registry_enabled": True,
+        "registry_path": "data/paper_registry.json",
+        "retention_days": 30,
+        "fuzzy_title_threshold": 94,
+        "bootstrap_from_outputs": True,
+    },
     "digest": {
         "output_dir": "outputs",
         "output_formats": ["md", "html"],
@@ -71,9 +78,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "language": "zh-CN",
         "max_high_relevance": 20,
         "max_medium_relevance": 30,
-        "suppress_recent_output_duplicates": True,
-        "recent_output_lookback_days": 5,
-        "recent_output_lookback_files": 5,
     },
     "safety": {
         "dry_run_default": True,

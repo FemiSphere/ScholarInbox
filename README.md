@@ -8,7 +8,7 @@ ScholarPulse 是一个本地 Python 工作流：从专用 Gmail 邮箱读取 Goo
 
 - 读取 Gmail 未读邮件；不会删除邮件。
 - 解析 Google Scholar 和常见期刊/出版社邮件；非 Scholar 邮件可先由 LLM 做结构化抽取。
-- 按 DOI、规范化 URL、标题和模糊标题相似度去重，并过滤近期 digest 中已出现的论文。
+- 按 DOI、arXiv ID、规范化 URL 和标题去重，并用轻量 JSON 索引过滤近 30 天已出现的论文。
 - 从 `research_interests.md` 提炼近期研究兴趣，据此生成高、中、低相关性和中文推荐理由。
 - 支持 Codex CLI 与 OpenAI-compatible API；当前示例包含 DeepSeek 配置。
 - 同时输出 Markdown 与 HTML；HTML 支持搜索、相关性筛选、详情折叠和可用的 TOC 图片。
@@ -21,14 +21,14 @@ ScholarPulse 是一个本地 Python 工作流：从专用 Gmail 邮箱读取 Goo
 Gmail 学术提醒
   -> 邮件过滤
   -> 论文条目解析
-  -> DOI / URL / 标题去重
+  -> 当前批次去重 + 近 30 天 JSON 身份索引
   -> 读取并提炼近期研究兴趣
   -> LLM 分批排序、翻译和摘要
   -> Markdown + HTML
   -> 可选：成功后标记邮件已读
 ```
 
-实现边界、关键模块和当前性能分析见 [`docs/architecture-and-performance.md`](docs/architecture-and-performance.md)。
+实现边界、关键模块和当前性能分析见 [`docs/architecture-and-performance.md`](docs/architecture-and-performance.md)，跨日期去重规则见 [`docs/deduplication.md`](docs/deduplication.md)。
 
 ## 安装
 
@@ -94,6 +94,14 @@ DeepSeek 参数和 JSON 输出约束见 [`docs/deepseek-api-guide.md`](docs/deep
 我近期关注五边形框架材料的理论设计与物性研究，尤其是 COF/MOF/HOF、
 机器学习势函数、声子与热输运，以及 AI 辅助材料结构设计。
 ```
+
+## 跨日期去重
+
+程序使用 `data/paper_registry.json` 保存最近 30 天内见过的论文身份。索引只保存标题别名、DOI、arXiv ID、规范化 URL、来源和日期，不保存邮件正文；`data/` 已被 Git 忽略。
+
+第一次启用时会从近 30 天 Markdown digest 回填。以后在正式运行成功生成输出后，程序会把本次解析出的全部候选论文写入索引，包括因展示数量限制而未出现在 digest 中的条目。sample 和 dry-run 只读取、不写入索引。
+
+详细匹配和保留规则见 [`docs/deduplication.md`](docs/deduplication.md)。
 
 ## 运行
 
