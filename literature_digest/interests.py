@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -7,6 +8,10 @@ from typing import Any
 
 from .llm import LLMClient, LLMError
 from .models import InterestProfile
+from .telemetry import llm_operation
+
+
+INTEREST_CACHE_VERSION = 1
 
 
 def read_research_interests(path: str | Path) -> str:
@@ -17,6 +22,40 @@ def read_research_interests(path: str | Path) -> str:
 
 
 def analyze_research_interests(text: str, llm: LLMClient) -> InterestProfile:
+    try:
+        payload = _request_interest_profile(text, llm)
+    except LLMError:
+        return fallback_interest_profile(text)
+    return profile_from_payload(payload)
+
+
+def load_or_analyze_research_interests(
+    text: str,
+    llm: LLMClient,
+    *,
+    cache_path: str | Path,
+    model_fingerprint: str,
+    refresh: bool = False,
+) -> tuple[InterestProfile, bool]:
+    """Return a cached interest profile when both source text and model settings match."""
+
+    path = Path(cache_path)
+    cache_key = _interest_cache_key(text, model_fingerprint)
+    if not refresh:
+        cached = _read_interest_cache(path, cache_key)
+        if cached is not None:
+            return cached, True
+
+    try:
+        payload = _request_interest_profile(text, llm)
+    except LLMError:
+        return fallback_interest_profile(text), False
+    profile = profile_from_payload(payload)
+    _write_interest_cache(path, cache_key, payload)
+    return profile, False
+
+
+def _request_interest_profile(text: str, llm: LLMClient) -> dict[str, Any]:
     prompt = f"""
 INTEREST_PROFILE_JSON
 
@@ -46,11 +85,9 @@ Rules:
 Research-interest note:
 {text}
 """.strip()
-    try:
+    with llm_operation("interest_profile", 1):
         payload = llm.complete_json(prompt)
-    except LLMError:
-        return fallback_interest_profile(text)
-    return profile_from_payload(payload)
+    return payload
 
 
 def fallback_interest_profile(text: str) -> InterestProfile:
@@ -114,6 +151,55 @@ def profile_to_json(profile: InterestProfile) -> str:
         ensure_ascii=False,
         indent=2,
     )
+
+
+def _interest_cache_key(text: str, model_fingerprint: str) -> str:
+    material = json.dumps(
+        {
+            "version": INTEREST_CACHE_VERSION,
+            "text": text,
+            "model": model_fingerprint,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _read_interest_cache(path: Path, expected_key: str) -> InterestProfile | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("cache_key") != expected_key:
+        return None
+    profile_payload = payload.get("profile")
+    if not isinstance(profile_payload, dict):
+        return None
+    return profile_from_payload(profile_payload)
+
+
+def _write_interest_cache(path: Path, cache_key: str, profile_payload: dict[str, Any]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(
+                {
+                    "version": INTEREST_CACHE_VERSION,
+                    "cache_key": cache_key,
+                    "profile": profile_payload,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(path)
+    except OSError:
+        # A cache failure must not prevent digest generation.
+        return
 
 
 def _extract_topic_phrases(text: str) -> list[str]:

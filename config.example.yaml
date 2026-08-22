@@ -31,6 +31,12 @@ gmail:
   # 示例："http://127.0.0.1:7897"
   proxy_url: ""
 
+  # 批量下载完整邮件；设为 1 可关闭 Gmail batch。
+  batch_fetch_size: 50
+
+  # Gmail batchModify 单次最多处理 1000 封；不影响 dry-run 边界。
+  batch_modify_size: 1000
+
 llm:
   # 主配置只选择一个 LLM 配置文件。
   # 默认使用 Codex CLI；如需切换 DeepSeek，请改为：
@@ -40,7 +46,9 @@ llm:
 research_interests:
   # 用自然语言维护近期研究兴趣。排序优先级默认来自这个文档。
   path: "research_interests.md"
-  refresh_each_run: true
+  # false 时按兴趣文件内容和模型配置哈希复用画像缓存。
+  refresh_each_run: false
+  cache_path: "data/cache/research_interests.json"
 
 filtering:
   skip_promotional: true
@@ -92,3 +100,14 @@ safety:
 progress:
   enabled: true
   show_timestamps: true
+
+performance:
+  # LLM 请求有限并发；遇到限流可降为 2，设为 1 可恢复串行。
+  parsing_max_workers: 3
+  ranking_max_workers: 3
+  # 20 是当前保守默认值；大批次可能降低请求数，但增加截断和整批重试风险。
+  ranking_batch_size: 20
+  # 非 Scholar 邮件在本地去重、去页脚后送入 LLM 的上限。
+  email_text_max_chars: 6000
+  email_max_links: 50
+  email_max_images: 20

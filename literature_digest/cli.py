@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -13,13 +14,19 @@ from .digest import write_digests
 from .email_filter import classify_email
 from .env import load_dotenv_file
 from .gmail_client import GmailConnectionError, GmailClient
-from .interests import analyze_research_interests, fallback_interest_profile, read_research_interests
+from .interests import (
+    analyze_research_interests,
+    fallback_interest_profile,
+    load_or_analyze_research_interests,
+    read_research_interests,
+)
 from .llm import build_llm_client
 from .models import DigestRun, RunStats, SkippedEmail
 from .parsers import parse_emails
 from .ranking import count_relevance, rank_papers
 from .recent_outputs import load_recent_output_entries
 from .sample_data import sample_emails
+from .telemetry import RunMetrics
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -28,6 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     base_dir = Path.cwd()
     load_dotenv_file(base_dir / ".env")
     config = load_config(args.config)
+    metrics = RunMetrics()
     progress = ProgressReporter(
         enabled=bool(config.get("progress", {}).get("enabled", True)) and not args.quiet,
         show_timestamps=bool(config.get("progress", {}).get("show_timestamps", True)),
@@ -39,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.reauth_gmail:
         progress.step("开始重新授权 Gmail OAuth")
-        gmail = GmailClient(config, base_dir=base_dir)
+        gmail = GmailClient(config, base_dir=base_dir, metrics=metrics)
         try:
             token_path = gmail.reauthorize()
         except GmailConnectionError as exc:
@@ -50,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sample_mode, warnings = _should_use_sample(args, config, dry_run, base_dir)
     progress.step("初始化完成")
-    llm = build_llm_client(config, sample_mode=sample_mode)
+    llm = build_llm_client(config, sample_mode=sample_mode, metrics=metrics)
 
     if sample_mode:
         progress.step("读取内置样例邮件")
@@ -60,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
             f"搜索 Gmail 未读邮件，query={config['gmail'].get('query', 'is:unread')!r}，"
             f"max={config['gmail']['max_emails_per_run']}"
         )
-        gmail = GmailClient(config, base_dir=base_dir)
+        gmail = GmailClient(config, base_dir=base_dir, metrics=metrics)
         try:
             emails = gmail.fetch_unread_emails(max_results=config["gmail"]["max_emails_per_run"])
         except GmailConnectionError as exc:
@@ -91,6 +99,10 @@ def main(argv: list[str] | None = None) -> int:
         accepted,
         llm=llm,
         llm_structure_non_scholar=bool(config["parsing"].get("llm_structure_non_scholar", True)),
+        max_workers=int(config["performance"].get("parsing_max_workers", 3)),
+        llm_text_max_chars=int(config["performance"].get("email_text_max_chars", 6000)),
+        llm_max_links=int(config["performance"].get("email_max_links", 50)),
+        llm_max_images=int(config["performance"].get("email_max_images", 20)),
     )
     progress.step(f"解析完成：{len(entries)} 个候选条目")
 
@@ -137,13 +149,34 @@ def main(argv: list[str] | None = None) -> int:
     interests_path = _resolve_path(config["research_interests"]["path"], base_dir)
     interest_text = read_research_interests(interests_path)
     if candidate_entries:
-        progress.step("调用 LLM 提炼近期研究兴趣")
-        interest_profile = analyze_research_interests(interest_text, llm)
+        interest_config = config["research_interests"]
+        if sample_mode:
+            interest_profile = analyze_research_interests(interest_text, llm)
+            cache_hit = False
+        else:
+            interest_profile, cache_hit = load_or_analyze_research_interests(
+                interest_text,
+                llm,
+                cache_path=_resolve_path(
+                    interest_config.get("cache_path", "data/cache/research_interests.json"),
+                    base_dir,
+                ),
+                model_fingerprint=_llm_cache_fingerprint(config),
+                refresh=bool(interest_config.get("refresh_each_run", False)),
+            )
+        if sample_mode:
+            progress.step("样例模式使用离线研究兴趣画像，不读写生产缓存")
+        elif cache_hit:
+            progress.step("近期研究兴趣画像命中本地缓存")
+        else:
+            progress.step("近期研究兴趣画像已更新")
         progress.step(f"调用 LLM 分批排序和摘要：{len(candidate_entries)} 篇论文")
         ranked = rank_papers(
             candidate_entries,
             interest_profile,
             llm,
+            batch_size=int(config["performance"].get("ranking_batch_size", 20)),
+            max_workers=int(config["performance"].get("ranking_max_workers", 3)),
             progress=lambda current, total: progress.item(current, total, "LLM 排序批次"),
         )
         progress.step("LLM 排序和摘要完成")
@@ -186,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not dry_run and not sample_mode and config["gmail"].get("mark_as_read", False):
         progress.step(f"标记已处理邮件为已读：{len(accepted)} 封")
-        gmail = GmailClient(config, base_dir=base_dir)
+        gmail = GmailClient(config, base_dir=base_dir, metrics=metrics)
         try:
             gmail.mark_as_read([email.id for email in accepted])
         except GmailConnectionError as exc:
@@ -203,6 +236,8 @@ def main(argv: list[str] | None = None) -> int:
         f"duplicates={stats.duplicates_removed}, high={stats.high_relevance}, "
         f"medium={stats.medium_relevance}, low={stats.low_relevance}, skipped={stats.skipped_emails}"
     )
+    for line in metrics.summary_lines():
+        print(line)
     if dry_run:
         print("Dry-run mode: no email state was modified and no emails were sent.")
     return 0
@@ -320,3 +355,30 @@ def _shorten(value: str, max_length: int) -> str:
     if len(text) <= max_length:
         return text
     return text[: max_length - 3].rstrip() + "..."
+
+
+def _llm_cache_fingerprint(config: dict[str, Any]) -> str:
+    llm_config = config.get("llm", {})
+    provider = llm_config.get("provider", "")
+    provider_config = llm_config.get(provider, {})
+    if provider == "openai_compatible":
+        provider_config = llm_config.get("openai_compatible", {})
+    elif provider == "codex_cli":
+        provider_config = llm_config.get("codex_cli", {})
+    safe_provider_config = {
+        key: value
+        for key, value in provider_config.items()
+        if key not in {"api_key", "api_key_env"}
+    }
+    return json.dumps(
+        {
+            "provider": provider,
+            "model": safe_provider_config.get("model") or llm_config.get("model", ""),
+            "reasoning_effort": safe_provider_config.get("reasoning_effort")
+            or llm_config.get("reasoning_effort", ""),
+            "response_format_json": safe_provider_config.get("response_format_json", True),
+            "extra_body": safe_provider_config.get("extra_body", {}),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )

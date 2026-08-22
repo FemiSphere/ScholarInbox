@@ -5,9 +5,11 @@ import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from time import perf_counter, sleep
 from typing import Any
 
 from .base import LLMError, extract_json_object, redact_secrets
+from ..telemetry import RunMetrics, llm_json_retry
 
 
 @dataclass(slots=True)
@@ -21,6 +23,9 @@ class OpenAICompatibleClient:
     reasoning_effort: str = ""
     response_format_json: bool = True
     extra_body: dict[str, Any] | None = None
+    max_retries: int = 2
+    retry_backoff_seconds: float = 1.0
+    metrics: RunMetrics | None = None
 
     def complete(self, prompt: str) -> str:
         if self.api_key_env.strip().lower().startswith("sk-"):
@@ -62,16 +67,39 @@ class OpenAICompatibleClient:
             },
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            body_text = exc.read().decode("utf-8", errors="replace")
-            raise LLMError(
-                f"OpenAI-compatible API failed: HTTP {exc.code}: {redact_secrets(body_text)}"
-            ) from exc
-        except OSError as exc:
-            raise LLMError(f"OpenAI-compatible API request failed: {exc}") from exc
+        payload: dict[str, Any] = {}
+        for attempt in range(max(0, self.max_retries) + 1):
+            started_at = perf_counter()
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                    decoded = json.loads(response.read().decode("utf-8"))
+                    if not isinstance(decoded, dict):
+                        raise TypeError("response JSON was not an object")
+                    payload = decoded
+            except urllib.error.HTTPError as exc:
+                self._record_request(started_at, prompt, attempt, status=f"http_{exc.code}")
+                body_text = exc.read().decode("utf-8", errors="replace")
+                if exc.code in {429, 500, 502, 503, 504} and attempt < max(0, self.max_retries):
+                    sleep(max(0.0, self.retry_backoff_seconds) * (2**attempt))
+                    continue
+                raise LLMError(
+                    f"OpenAI-compatible API failed: HTTP {exc.code}: {redact_secrets(body_text)}"
+                ) from exc
+            except OSError as exc:
+                self._record_request(started_at, prompt, attempt, status="network_error")
+                if attempt < max(0, self.max_retries):
+                    sleep(max(0.0, self.retry_backoff_seconds) * (2**attempt))
+                    continue
+                raise LLMError(f"OpenAI-compatible API request failed: {exc}") from exc
+            except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as exc:
+                self._record_request(started_at, prompt, attempt, status="invalid_response")
+                if attempt < max(0, self.max_retries):
+                    sleep(max(0.0, self.retry_backoff_seconds) * (2**attempt))
+                    continue
+                raise LLMError(f"OpenAI-compatible API returned invalid JSON: {exc}") from exc
+            else:
+                self._record_request(started_at, prompt, attempt, usage=payload.get("usage"))
+                break
 
         try:
             return payload["choices"][0]["message"]["content"].strip()
@@ -91,7 +119,8 @@ Return ONLY one valid JSON object that follows the requested schema.
 Do not include Markdown fences, explanations, reasoning text, status text, or any text before or after the JSON object.
 The first character must be `{{` and the last character must be `}}`.
 """.strip()
-            second_response = self.complete(retry_prompt)
+            with llm_json_retry():
+                second_response = self.complete(retry_prompt)
             try:
                 return extract_json_object(second_response)
             except LLMError as exc:
@@ -100,6 +129,25 @@ The first character must be `{{` and the last character must be `}}`.
                     "OpenAI-compatible API response did not contain a parseable JSON object after retry. "
                     f"Response preview: {preview}"
                 ) from exc
+
+    def _record_request(
+        self,
+        started_at: float,
+        prompt: str,
+        attempt: int,
+        *,
+        status: str = "ok",
+        usage: dict[str, Any] | None = None,
+    ) -> None:
+        if self.metrics is None:
+            return
+        self.metrics.record_llm_request(
+            elapsed_seconds=perf_counter() - started_at,
+            prompt_chars=len(prompt),
+            retry=attempt > 0,
+            status=status,
+            usage=usage,
+        )
 
 
 def _shorten_for_error(text: str, limit: int = 800) -> str:

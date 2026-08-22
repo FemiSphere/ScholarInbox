@@ -6,9 +6,15 @@ from .base import LLMError
 from .codex_cli import CodexCLIClient
 from .offline_stub import OfflineStubClient
 from .openai_compatible import OpenAICompatibleClient
+from ..telemetry import RunMetrics
 
 
-def build_llm_client(config: dict[str, Any], *, sample_mode: bool = False):
+def build_llm_client(
+    config: dict[str, Any],
+    *,
+    sample_mode: bool = False,
+    metrics: RunMetrics | None = None,
+):
     llm_config = config["llm"]
     provider = llm_config.get("provider", "codex_cli")
     if sample_mode and config["safety"].get("allow_offline_llm_for_sample", False):
@@ -23,6 +29,7 @@ def build_llm_client(config: dict[str, Any], *, sample_mode: bool = False):
             ephemeral=bool(codex_config.get("ephemeral", True)),
             max_output_tokens=llm_config.get("max_output_tokens"),
             extra_args=list(codex_config.get("extra_args", [])),
+            metrics=metrics,
         )
     if provider == "openai_compatible":
         api_config = llm_config.get("openai_compatible", {})
@@ -36,6 +43,9 @@ def build_llm_client(config: dict[str, Any], *, sample_mode: bool = False):
             reasoning_effort=api_config.get("reasoning_effort", ""),
             response_format_json=bool(api_config.get("response_format_json", True)),
             extra_body=dict(api_config.get("extra_body", {})),
+            max_retries=int(api_config.get("max_retries", 2)),
+            retry_backoff_seconds=float(api_config.get("retry_backoff_seconds", 1.0)),
+            metrics=metrics,
         )
     if provider == "offline_stub":
         return OfflineStubClient()

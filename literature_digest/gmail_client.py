@@ -6,9 +6,11 @@ import re
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from .models import EmailMessage
+from .telemetry import RunMetrics
 
 
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
@@ -27,11 +29,18 @@ class GmailConnectionError(RuntimeError):
 
 
 class GmailClient:
-    def __init__(self, config: dict[str, Any], *, base_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        *,
+        base_dir: Path | None = None,
+        metrics: RunMetrics | None = None,
+    ) -> None:
         self.config = config
         self.base_dir = base_dir or Path.cwd()
         self.gmail_config = config["gmail"]
         self.parsing_config = config["parsing"]
+        self.metrics = metrics
         self._service = None
 
     @property
@@ -79,9 +88,14 @@ class GmailClient:
                 includeSpamTrash=include_spam_trash,
             )
         )
-        response = self._execute(request, "searching unread Gmail messages")
+        response = self._execute(
+            request,
+            "searching unread Gmail messages",
+            metric_operation="list_messages",
+        )
         messages = response.get("messages", [])
-        return [self.fetch_email(message["id"]) for message in messages]
+        message_ids = [message["id"] for message in messages]
+        return self._fetch_emails(message_ids)
 
     def fetch_email(self, message_id: str) -> EmailMessage:
         service = self._get_service()
@@ -90,7 +104,14 @@ class GmailClient:
             .messages()
             .get(userId="me", id=message_id, format="full")
         )
-        message = self._execute(request, f"fetching Gmail message {message_id}")
+        message = self._execute(
+            request,
+            f"fetching Gmail message {message_id}",
+            metric_operation="get_message",
+        )
+        return self._email_from_message(message_id, message)
+
+    def _email_from_message(self, message_id: str, message: dict[str, Any]) -> EmailMessage:
         headers = {
             header["name"].lower(): header.get("value", "")
             for header in message.get("payload", {}).get("headers", [])
@@ -133,13 +154,53 @@ class GmailClient:
         if not message_ids:
             return
         service = self._get_service()
-        for message_id in message_ids:
-            request = service.users().messages().modify(
+        batch_size = max(1, min(1000, int(self.gmail_config.get("batch_modify_size", 1000))))
+        for offset in range(0, len(message_ids), batch_size):
+            chunk = message_ids[offset : offset + batch_size]
+            request = service.users().messages().batchModify(
                 userId="me",
-                id=message_id,
-                body={"removeLabelIds": ["UNREAD"]},
+                body={"ids": chunk, "removeLabelIds": ["UNREAD"]},
             )
-            self._execute(request, f"marking Gmail message {message_id} as read")
+            self._execute(
+                request,
+                f"marking {len(chunk)} Gmail messages as read",
+                metric_operation="batch_mark_read",
+                metric_item_count=len(chunk),
+            )
+
+    def _fetch_emails(self, message_ids: list[str]) -> list[EmailMessage]:
+        if not message_ids:
+            return []
+        batch_size = max(1, min(100, int(self.gmail_config.get("batch_fetch_size", 50))))
+        service = self._get_service()
+        if batch_size == 1 or not hasattr(service, "new_batch_http_request"):
+            return [self.fetch_email(message_id) for message_id in message_ids]
+
+        messages_by_id: dict[str, dict[str, Any]] = {}
+        for offset in range(0, len(message_ids), batch_size):
+            chunk = message_ids[offset : offset + batch_size]
+            failures: dict[str, BaseException] = {}
+
+            def callback(request_id, response, exception):
+                if exception is not None:
+                    failures[str(request_id)] = exception
+                elif isinstance(response, dict):
+                    messages_by_id[str(request_id)] = response
+
+            batch = service.new_batch_http_request(callback=callback)
+            for message_id in chunk:
+                request = service.users().messages().get(userId="me", id=message_id, format="full")
+                batch.add(request, request_id=message_id)
+            self._execute_batch(batch, item_count=len(chunk))
+            if failures:
+                failed_ids = ", ".join(failures)[:240]
+                raise GmailConnectionError(f"Gmail batch message fetch failed for: {failed_ids}")
+
+        missing = [message_id for message_id in message_ids if message_id not in messages_by_id]
+        if missing:
+            missing_ids = ", ".join(missing)[:240]
+            raise GmailConnectionError(f"Gmail batch message fetch returned no response for: {missing_ids}")
+        return [self._email_from_message(message_id, messages_by_id[message_id]) for message_id in message_ids]
 
     def _get_service(self):
         if self._service is not None:
@@ -186,13 +247,49 @@ class GmailClient:
         flow = installed_app_flow.from_client_secrets_file(str(self.credentials_path), GMAIL_SCOPES)
         return flow.run_local_server(port=0)
 
-    def _execute(self, request, action: str) -> dict[str, Any]:
+    def _execute(
+        self,
+        request,
+        action: str,
+        *,
+        metric_operation: str = "gmail_request",
+        metric_item_count: int = 1,
+    ) -> dict[str, Any]:
+        started_at = perf_counter()
         try:
-            return request.execute()
+            response = request.execute()
         except TimeoutError as exc:
+            self._record_request(metric_operation, metric_item_count, started_at, "timeout")
             raise GmailConnectionError(_connection_error_message(action)) from exc
         except OSError as exc:
+            self._record_request(metric_operation, metric_item_count, started_at, "network_error")
             raise GmailConnectionError(_connection_error_message(action, detail=str(exc))) from exc
+        self._record_request(metric_operation, metric_item_count, started_at, "ok")
+        return response
+
+    def _execute_batch(self, batch, *, item_count: int) -> None:
+        started_at = perf_counter()
+        try:
+            batch.execute()
+        except TimeoutError as exc:
+            self._record_request("batch_get_messages", item_count, started_at, "timeout")
+            raise GmailConnectionError(_connection_error_message("batch fetching Gmail messages")) from exc
+        except OSError as exc:
+            self._record_request("batch_get_messages", item_count, started_at, "network_error")
+            raise GmailConnectionError(
+                _connection_error_message("batch fetching Gmail messages", detail=str(exc))
+            ) from exc
+        self._record_request("batch_get_messages", item_count, started_at, "ok")
+
+    def _record_request(self, operation: str, item_count: int, started_at: float, status: str) -> None:
+        if self.metrics is None:
+            return
+        self.metrics.record_io_request(
+            operation=operation,
+            item_count=item_count,
+            elapsed_seconds=perf_counter() - started_at,
+            status=status,
+        )
 
     def _walk_parts(
         self,
@@ -262,7 +359,11 @@ class GmailClient:
             .attachments()
             .get(userId="me", messageId=message_id, id=attachment_id)
         )
-        attachment = self._execute(request, f"fetching Gmail attachment {attachment_id}")
+        attachment = self._execute(
+            request,
+            f"fetching Gmail attachment {attachment_id}",
+            metric_operation="get_attachment",
+        )
         return _decode_body_bytes(attachment.get("data", ""))
 
     def _image_dir(self) -> Path:

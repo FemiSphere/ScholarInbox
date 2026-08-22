@@ -15,6 +15,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "token_path": "token.json",
         "request_timeout_seconds": 30,
         "proxy_url": "",
+        "batch_fetch_size": 50,
+        "batch_modify_size": 1000,
     },
     "llm": {
         "provider": "codex_cli",
@@ -30,12 +32,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "temperature": 0.2,
             "reasoning_effort": "",
             "response_format_json": True,
+            "max_retries": 2,
+            "retry_backoff_seconds": 1.0,
             "extra_body": {},
         },
     },
     "research_interests": {
         "path": "research_interests.md",
-        "refresh_each_run": True,
+        "refresh_each_run": False,
+        "cache_path": "data/cache/research_interests.json",
     },
     "filtering": {
         "skip_promotional": True,
@@ -80,6 +85,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "progress": {
         "enabled": True,
         "show_timestamps": True,
+    },
+    "performance": {
+        "parsing_max_workers": 3,
+        "ranking_max_workers": 3,
+        "ranking_batch_size": 20,
+        "email_text_max_chars": 6000,
+        "email_max_links": 50,
+        "email_max_images": 20,
     },
 }
 

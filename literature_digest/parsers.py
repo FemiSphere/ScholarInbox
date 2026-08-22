@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from html import unescape
 from html.parser import HTMLParser
 from typing import Any, Iterable
@@ -11,6 +12,7 @@ from urllib.parse import parse_qs, urlsplit
 from .dedupe import DOI_RE, normalize_doi
 from .llm import LLMClient, LLMError
 from .models import EmailMessage, PaperEntry
+from .telemetry import llm_operation
 
 
 URL_RE = re.compile(r"https?://[^\s<>)\"']+", re.IGNORECASE)
@@ -32,6 +34,20 @@ BAD_LINK_TEXT = {
     "switch off recommended reading email alerts",
     "visit our email preference center",
 }
+BOILERPLATE_TEXT = (
+    "unsubscribe",
+    "manage alerts",
+    "manage preferences",
+    "email preference",
+    "privacy policy",
+    "view this email in your browser",
+    "view online",
+    "follow us on",
+    "copyright ©",
+    "all rights reserved",
+    "stop all emails",
+    "switch off recommended reading",
+)
 
 
 class _AnchorExtractor(HTMLParser):
@@ -100,16 +116,33 @@ def parse_emails(
     *,
     llm: LLMClient | None = None,
     llm_structure_non_scholar: bool = False,
+    max_workers: int = 1,
+    llm_text_max_chars: int = 6000,
+    llm_max_links: int = 50,
+    llm_max_images: int = 20,
 ) -> list[PaperEntry]:
-    entries: list[PaperEntry] = []
-    for email in emails:
+    email_list = list(emails)
+
+    def parse_one(email: EmailMessage) -> list[PaperEntry]:
         if llm_structure_non_scholar and llm is not None and not _is_google_scholar_email(email):
-            structured = _parse_non_scholar_email_with_llm(email, llm)
+            structured = _parse_non_scholar_email_with_llm(
+                email,
+                llm,
+                text_max_chars=llm_text_max_chars,
+                max_links=llm_max_links,
+                max_images=llm_max_images,
+            )
             if structured:
-                entries.extend(structured)
-                continue
-        entries.extend(parse_email(email))
-    return entries
+                return structured
+        return parse_email(email)
+
+    worker_count = min(max(1, max_workers), len(email_list) or 1)
+    if worker_count == 1:
+        parsed = [parse_one(email) for email in email_list]
+    else:
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="email-parser") as executor:
+            parsed = list(executor.map(parse_one, email_list))
+    return [entry for email_entries in parsed for entry in email_entries]
 
 
 def parse_email(email: EmailMessage) -> list[PaperEntry]:
@@ -159,15 +192,24 @@ def _parse_html_email(email: EmailMessage) -> list[PaperEntry]:
     return entries
 
 
-def _parse_non_scholar_email_with_llm(email: EmailMessage, llm: LLMClient) -> list[PaperEntry]:
+def _parse_non_scholar_email_with_llm(
+    email: EmailMessage,
+    llm: LLMClient,
+    *,
+    text_max_chars: int,
+    max_links: int,
+    max_images: int,
+) -> list[PaperEntry]:
     if not (email.html or email.text or email.snippet):
         return []
     extractor = _AnchorExtractor()
     extractor.feed(email.html or "")
-    text = html_to_text(email.html) if email.html else normalize_space(email.text or email.snippet)
-    links = _candidate_links_for_llm(extractor.links)
-    images = _candidate_images_for_llm(list(email.image_paths) + list(extractor.images))
+    text = _compact_email_text(email, max_chars=max(500, text_max_chars))
+    links = _candidate_links_for_llm(extractor.links)[: max(0, max_links)]
+    images = _candidate_images_for_llm(list(email.image_paths) + list(extractor.images))[: max(0, max_images)]
     if not links and not text:
+        return []
+    if not links and len(text) < 500:
         return []
 
     prompt = f"""
@@ -208,16 +250,17 @@ EMAIL_SENDER:
 {email.sender}
 
 CANDIDATE_LINKS_JSON:
-{json.dumps(links[:80], ensure_ascii=False)}
+{json.dumps(links, ensure_ascii=False)}
 
 CANDIDATE_IMAGES_JSON:
-{json.dumps(images[:40], ensure_ascii=False)}
+{json.dumps(images, ensure_ascii=False)}
 
 EMAIL_TEXT:
-{text[:9000]}
+{text}
 """.strip()
     try:
-        payload = llm.complete_json(prompt)
+        with llm_operation("email_extraction", 1):
+            payload = llm.complete_json(prompt)
     except LLMError:
         return []
     return _paper_entries_from_llm_payload(payload, email, images)
@@ -254,6 +297,7 @@ def _parse_text_email(email: EmailMessage) -> list[PaperEntry]:
 
 def _candidate_links_for_llm(links: list[tuple[str, str]]) -> list[dict[str, str]]:
     candidates: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
     for href, link_text in links:
         title = normalize_space(link_text)
         cleaned_url = _clean_url(href)
@@ -261,8 +305,47 @@ def _candidate_links_for_llm(links: list[tuple[str, str]]) -> list[dict[str, str
             continue
         if _is_obvious_non_paper_link(title, cleaned_url):
             continue
+        key = (title.casefold(), cleaned_url)
+        if key in seen:
+            continue
+        seen.add(key)
         candidates.append({"text": title, "url": cleaned_url})
     return candidates
+
+
+def _compact_email_text(email: EmailMessage, *, max_chars: int) -> str:
+    if email.html:
+        extractor = _TextExtractor()
+        extractor.feed(email.html)
+        raw_parts = extractor.parts
+    else:
+        raw_parts = (email.text or email.snippet).splitlines()
+
+    parts: list[str] = []
+    seen: set[str] = set()
+    for raw_part in raw_parts:
+        part = normalize_space(raw_part)
+        if not part:
+            continue
+        lower = part.casefold()
+        if len(part) <= 320 and any(marker in lower for marker in BOILERPLATE_TEXT):
+            continue
+        key = lower[:500]
+        if key in seen:
+            continue
+        seen.add(key)
+        parts.append(part)
+
+    result: list[str] = []
+    used = 0
+    for part in parts:
+        remaining = max_chars - used
+        if remaining <= 0:
+            break
+        selected = part[:remaining]
+        result.append(selected)
+        used += len(selected) + 1
+    return "\n".join(result)
 
 
 def _candidate_images_for_llm(images: list[object]) -> list[dict[str, str | int]]:

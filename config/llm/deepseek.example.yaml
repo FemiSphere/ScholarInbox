@@ -35,6 +35,9 @@ openai_compatible:
 
   # 开启 JSON Output：请求体会包含 response_format: {"type": "json_object"}。
   response_format_json: true
+  # 429、5xx 和临时网络错误使用指数退避重试。
+  max_retries: 2
+  retry_backoff_seconds: 1.0
 
   # DeepSeek v4 默认开启思考模式。此处关闭思考模式以降低延迟和成本。
   extra_body:

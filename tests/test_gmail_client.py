@@ -233,6 +233,94 @@ def test_reauthorize_backs_up_existing_token_and_writes_new_token(tmp_path, monk
     assert captured["port"] == 0
 
 
+def test_fetch_emails_uses_batch_request_and_preserves_order(tmp_path):
+    class MessageRequest:
+        def __init__(self, message_id):
+            self.message_id = message_id
+
+    class FakeMessages:
+        def get(self, **kwargs):
+            return MessageRequest(kwargs["id"])
+
+    class FakeUsers:
+        def messages(self):
+            return FakeMessages()
+
+    class FakeBatch:
+        def __init__(self, callback):
+            self.callback = callback
+            self.requests = []
+
+        def add(self, request, request_id):
+            self.requests.append((request, request_id))
+
+        def execute(self):
+            for request, request_id in reversed(self.requests):
+                self.callback(
+                    request_id,
+                    {
+                        "id": request.message_id,
+                        "threadId": f"thread-{request.message_id}",
+                        "labelIds": ["UNREAD"],
+                        "payload": {
+                            "headers": [
+                                {"name": "Subject", "value": f"subject-{request.message_id}"},
+                                {"name": "From", "value": "journal@example.org"},
+                            ]
+                        },
+                    },
+                    None,
+                )
+
+    class FakeService:
+        def users(self):
+            return FakeUsers()
+
+        def new_batch_http_request(self, callback):
+            return FakeBatch(callback)
+
+    client = GmailClient(_config(), base_dir=tmp_path)
+    client._service = FakeService()
+
+    emails = client._fetch_emails(["a", "b", "c"])
+
+    assert [email.id for email in emails] == ["a", "b", "c"]
+    assert [email.subject for email in emails] == ["subject-a", "subject-b", "subject-c"]
+
+
+def test_mark_as_read_uses_batch_modify(tmp_path):
+    captured = []
+
+    class Request:
+        def execute(self):
+            return {}
+
+    class FakeMessages:
+        def batchModify(self, **kwargs):
+            captured.append(kwargs["body"])
+            return Request()
+
+    class FakeUsers:
+        def messages(self):
+            return FakeMessages()
+
+    class FakeService:
+        def users(self):
+            return FakeUsers()
+
+    config = _config()
+    config["gmail"]["batch_modify_size"] = 2
+    client = GmailClient(config, base_dir=tmp_path)
+    client._service = FakeService()
+
+    client.mark_as_read(["a", "b", "c"])
+
+    assert captured == [
+        {"ids": ["a", "b"], "removeLabelIds": ["UNREAD"]},
+        {"ids": ["c"], "removeLabelIds": ["UNREAD"]},
+    ]
+
+
 def _config():
     return {
         "gmail": {

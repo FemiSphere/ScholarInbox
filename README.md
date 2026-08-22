@@ -12,7 +12,8 @@ ScholarPulse 是一个本地 Python 工作流：从专用 Gmail 邮箱读取 Goo
 - 从 `research_interests.md` 提炼近期研究兴趣，据此生成高、中、低相关性和中文推荐理由。
 - 支持 Codex CLI 与 OpenAI-compatible API；当前示例包含 DeepSeek 配置。
 - 同时输出 Markdown 与 HTML；HTML 支持搜索、相关性筛选、详情折叠和可用的 TOC 图片。
-- 支持 dry-run、样例数据、Gmail OAuth 重新授权、可配置代理和运行日志。
+- 支持 dry-run、样例数据、Gmail OAuth 重新授权、可配置代理和不含正文/密钥的请求级性能日志。
+- 排序与非 Scholar 抽取使用可配置的有限并发；Gmail 支持批量读取和批量已读标记。
 
 ## 工作流
 
@@ -85,7 +86,7 @@ DeepSeek 参数和 JSON 输出约束见 [`docs/deepseek-api-guide.md`](docs/deep
 
 ## 研究兴趣
 
-直接编辑 `research_interests.md`，用自然语言描述当前项目、材料体系、方法、物性和不关心的方向。程序每次有候选论文时都会调用一次 LLM，将这份文本提炼为结构化兴趣画像。
+直接编辑 `research_interests.md`，用自然语言描述当前项目、材料体系、方法、物性和不关心的方向。程序会按兴趣文本和模型配置的哈希缓存结构化画像；只有内容或模型变化，或设置 `refresh_each_run: true` 时才重新调用 LLM。
 
 示例：
 
@@ -100,6 +101,12 @@ DeepSeek 参数和 JSON 输出约束见 [`docs/deepseek-api-guide.md`](docs/deep
 
 ```bash
 python -m literature_digest --dry-run --sample
+```
+
+离线比较排序并发数和批大小：
+
+```bash
+python scripts/benchmark_performance.py
 ```
 
 再小批量读取真实邮箱：
@@ -171,5 +178,6 @@ python -m literature_digest --dry-run --sample
 
 - 邮件格式适配仍是启发式与 LLM 结构化抽取的组合，不保证覆盖所有出版社模板。
 - 排序依据标题、来源、邮件片段和可见元数据，不等同于阅读全文后的学术评价。
-- 当前 LLM 请求是串行执行的；大批量邮件的延迟主要随待处理邮件数和候选论文数增长。
+- LLM 并发默认限制为 3；若服务返回较多 429，可在 `performance` 中降为 2 或 1。实际速度仍受模型生成时间、输出长度和网络影响。
+- Gmail 附件仍需按 MIME part 单独下载；批量邮件读取主要减少完整消息请求的往返次数。
 - 邮件回发尚未实现；当前完成的是本地 Markdown/HTML 输出和可选的已读标记。

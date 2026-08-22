@@ -1,9 +1,13 @@
+import io
+import json
+import urllib.error
 from pathlib import Path
 
 from literature_digest.config import load_config
 from literature_digest.llm import LLMError
 from literature_digest.llm.base import extract_json_object
 from literature_digest.llm.openai_compatible import OpenAICompatibleClient
+from literature_digest.telemetry import RunMetrics, llm_operation
 
 
 def test_load_config_merges_external_llm_config(tmp_path, monkeypatch):
@@ -120,3 +124,65 @@ def test_openai_compatible_complete_json_retries_malformed_json_response():
 
     assert payload == {"papers": []}
     assert client.calls == 2
+
+
+class FakeHTTPResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload).encode("utf-8")
+
+
+def test_openai_compatible_records_usage_and_transport_retry(monkeypatch):
+    calls = 0
+    metrics = RunMetrics()
+
+    def fake_urlopen(request, timeout):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise urllib.error.HTTPError(
+                request.full_url,
+                429,
+                "rate limited",
+                {},
+                io.BytesIO(b'{"error":"busy"}'),
+            )
+        return FakeHTTPResponse(
+            {
+                "choices": [{"message": {"content": '{"ok": true}'}}],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 4,
+                    "total_tokens": 14,
+                    "prompt_cache_hit_tokens": 3,
+                },
+            }
+        )
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key-not-logged")
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleClient(
+        base_url="https://api.deepseek.com",
+        api_key_env="DEEPSEEK_API_KEY",
+        model="test-model",
+        retry_backoff_seconds=0,
+        metrics=metrics,
+    )
+
+    with llm_operation("paper_ranking", 20):
+        payload = client.complete_json("return json")
+
+    assert payload == {"ok": True}
+    assert calls == 2
+    assert [metric.status for metric in metrics.llm_requests] == ["http_429", "ok"]
+    assert metrics.llm_requests[1].retry is True
+    assert metrics.llm_requests[1].total_tokens == 14
+    assert metrics.llm_requests[1].cache_hit_tokens == 3

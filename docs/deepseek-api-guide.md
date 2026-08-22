@@ -150,15 +150,19 @@ DeepSeek 文档说明上下文硬盘缓存默认开启，不需要改代码。�
 
 ### 限速和排队
 
-DeepSeek 按账号限制并发，超过限制会返回 HTTP 429。请求发出后，如果服务器排队，连接可能保持一段时间。平台允许的并发上限不等于本项目应采用的并发数；邮件正文和排序批次的请求体较大，后续如增加并发，应先从 2–4 个请求开始测量延迟、错误率和 token 用量。
+DeepSeek 按账号限制并发，超过限制会返回 HTTP 429。请求发出后，如果服务器排队，连接可能保持一段时间。平台允许的并发上限不等于本项目应采用的并发数；邮件正文和排序批次的请求体较大，因此项目默认限制为 3 个 worker，并在日志中记录延迟、错误率和 token 用量。
 
 本项目建议：
 
 ```yaml
 timeout_seconds: 300
+
+openai_compatible:
+  max_retries: 2
+  retry_backoff_seconds: 1.0
 ```
 
-如果积压邮件很多或 DeepSeek 服务繁忙，可以调到 600。
+如果积压邮件很多或 DeepSeek 服务繁忙，可以把超时调到 600。若 429 较多，应先把 `performance.ranking_max_workers` 和 `parsing_max_workers` 降为 2，而不是继续增加重试。
 
 ### 常见错误码
 
@@ -243,6 +247,8 @@ openai_compatible:
   temperature: 0.2
   reasoning_effort: ""
   response_format_json: true
+  max_retries: 2
+  retry_backoff_seconds: 1.0
   extra_body:
     thinking:
       type: "disabled"
@@ -333,4 +339,4 @@ digest:
 - `config/llm/deepseek.local.yaml`：你的 DeepSeek 本地配置，已忽略
 - `.env`：保存 `DEEPSEEK_API_KEY`
 
-当前代码中的 LLM 调用顺序、日志证据和仅供后续评估的优化方向见 [`architecture-and-performance.md`](architecture-and-performance.md)。
+当前代码中的 LLM 调用顺序、历史日志、已实施优化和离线基准见 [`architecture-and-performance.md`](architecture-and-performance.md)。

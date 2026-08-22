@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from .interests import profile_to_json
 from .llm import LLMClient, LLMError
 from .llm.base import redact_secrets
 from .models import InterestProfile, PaperEntry, RankedPaper, RelevanceLevel
+from .telemetry import llm_operation
 
 
 def rank_papers(
@@ -17,16 +19,38 @@ def rank_papers(
     llm: LLMClient,
     *,
     batch_size: int = 20,
+    max_workers: int = 1,
     progress: Callable[[int, int], None] | None = None,
 ) -> list[RankedPaper]:
-    ranked: list[RankedPaper] = []
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1")
+    batches = [
+        (batch_number, offset, entries[offset : offset + batch_size])
+        for batch_number, offset in enumerate(range(0, len(entries), batch_size), start=1)
+    ]
     total_batches = (len(entries) + batch_size - 1) // batch_size
-    for batch_number, offset in enumerate(range(0, len(entries), batch_size), start=1):
-        if progress:
-            progress(batch_number, total_batches)
-        batch = entries[offset : offset + batch_size]
-        payload = _rank_batch(batch, profile, llm, offset)
-        ranked.extend(payload)
+    ranked_by_batch: dict[int, list[RankedPaper]] = {}
+    worker_count = min(max(1, max_workers), total_batches or 1)
+    if worker_count == 1:
+        for completed, (batch_number, offset, batch) in enumerate(batches, start=1):
+            ranked_by_batch[batch_number] = _rank_batch(batch, profile, llm, offset)
+            if progress:
+                progress(completed, total_batches)
+    else:
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="paper-ranker") as executor:
+            futures = {
+                executor.submit(_rank_batch, batch, profile, llm, offset): batch_number
+                for batch_number, offset, batch in batches
+            }
+            for completed, future in enumerate(as_completed(futures), start=1):
+                ranked_by_batch[futures[future]] = future.result()
+                if progress:
+                    progress(completed, total_batches)
+    ranked = [
+        paper
+        for batch_number in range(1, total_batches + 1)
+        for paper in ranked_by_batch[batch_number]
+    ]
     return sorted(ranked, key=lambda item: item.score, reverse=True)
 
 
@@ -98,7 +122,8 @@ PAPERS_JSON:
 {json.dumps(papers_json, ensure_ascii=False)}
 """.strip()
     try:
-        payload = llm.complete_json(prompt)
+        with llm_operation("paper_ranking", len(entries)):
+            payload = llm.complete_json(prompt)
     except LLMError as exc:
         return _fallback_ranked_batch(entries, profile, exc)
 

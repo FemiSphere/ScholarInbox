@@ -135,7 +135,7 @@ def test_text_email_extracts_doi_url_and_title_candidate():
 class StructuredEmailClient:
     def complete(self, prompt: str) -> str:
         assert "EMAIL_PAPER_EXTRACTION_JSON" in prompt
-        assert "Visit our Email Preference Center" in prompt
+        assert "Visit our Email Preference Center" not in prompt
         return """
         {
           "papers": [

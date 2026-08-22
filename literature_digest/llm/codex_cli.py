@@ -6,9 +6,11 @@ import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from .base import LLMError, extract_json_object
+from ..telemetry import RunMetrics, llm_json_retry
 
 
 @dataclass(slots=True)
@@ -20,6 +22,7 @@ class CodexCLIClient:
     ephemeral: bool = True
     max_output_tokens: int | None = None
     extra_args: list[str] = field(default_factory=list)
+    metrics: RunMetrics | None = None
 
     def complete(self, prompt: str) -> str:
         executable = _resolve_executable(self.executable)
@@ -47,6 +50,7 @@ class CodexCLIClient:
             args.extend(["-c", f"model_max_output_tokens={self.max_output_tokens}"])
         args.extend(self.extra_args)
         args.append(prompt)
+        started_at = perf_counter()
         try:
             result = subprocess.run(
                 args,
@@ -58,14 +62,17 @@ class CodexCLIClient:
                 check=False,
             )
         except FileNotFoundError as exc:
+            self._record_request(started_at, prompt, "start_error")
             raise LLMError(
                 f"Codex CLI executable not found: {self.executable}. "
                 "Set llm.codex_cli.executable to the full path of codex.cmd or codex.exe."
             ) from exc
         except OSError as exc:
+            self._record_request(started_at, prompt, "start_error")
             raise LLMError(f"Codex CLI could not be started: {exc}") from exc
         except subprocess.TimeoutExpired as exc:
             _cleanup_temp_file(output_path)
+            self._record_request(started_at, prompt, "timeout")
             raise LLMError(f"Codex CLI timed out after {self.timeout_seconds}s") from exc
 
         try:
@@ -76,8 +83,10 @@ class CodexCLIClient:
         stdout = result.stdout.strip() if result.stdout else ""
         stderr = result.stderr.strip() if result.stderr else ""
         if result.returncode != 0:
+            self._record_request(started_at, prompt, f"exit_{result.returncode}")
             detail = (stderr or stdout or final_message).strip()
             raise LLMError(f"Codex CLI failed with exit code {result.returncode}: {detail}")
+        self._record_request(started_at, prompt, "ok")
         return final_message or stdout
 
     def complete_json(self, prompt: str) -> dict[str, Any]:
@@ -92,7 +101,8 @@ Your previous response could not be parsed as JSON.
 Return ONLY one valid JSON object that follows the requested schema.
 Do not include Markdown fences, explanations, status text, or any text before or after the JSON object.
 """.strip()
-            second_response = self.complete(retry_prompt)
+            with llm_json_retry():
+                second_response = self.complete(retry_prompt)
             try:
                 return extract_json_object(second_response)
             except LLMError as second_error:
@@ -101,6 +111,15 @@ Do not include Markdown fences, explanations, status text, or any text before or
                     "Codex CLI did not return a parseable JSON object after retry. "
                     f"Response preview: {snippet}"
                 ) from second_error
+
+    def _record_request(self, started_at: float, prompt: str, status: str) -> None:
+        if self.metrics is None:
+            return
+        self.metrics.record_llm_request(
+            elapsed_seconds=perf_counter() - started_at,
+            prompt_chars=len(prompt),
+            status=status,
+        )
 
 
 def _resolve_executable(executable: str) -> str:
