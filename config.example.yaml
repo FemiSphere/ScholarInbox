@@ -112,6 +112,11 @@ progress:
   enabled: true
   show_timestamps: true
 
+ui:
+  # 交互终端显示 Rich 大标题和动态进度；重定向或非 TTY 自动降级。
+  banner_enabled: true
+  color_enabled: true
+
 telemetry:
   # 终端只显示汇总；逐请求耗时、token 和缓存命中保存到独立日志。
   detailed_log_enabled: true

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import date, datetime
 from pathlib import Path
-from time import perf_counter
 from typing import Any
 
 from .config import load_config
@@ -31,6 +31,7 @@ from .paper_registry import (
 from .ranking import count_relevance, rank_papers
 from .sample_data import sample_emails
 from .telemetry import RunMetrics
+from .ui import ProgressReporter
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -40,9 +41,12 @@ def main(argv: list[str] | None = None) -> int:
     load_dotenv_file(base_dir / ".env")
     config = load_config(args.config)
     metrics = RunMetrics()
+    ui_config = config.get("ui", {})
     progress = ProgressReporter(
         enabled=bool(config.get("progress", {}).get("enabled", True)) and not args.quiet,
         show_timestamps=bool(config.get("progress", {}).get("show_timestamps", True)),
+        color_enabled=bool(ui_config.get("color_enabled", True)) and not args.no_color,
+        run_log_path=os.environ.get("LITERATURE_DIGEST_RUN_LOG"),
     )
 
     dry_run = _resolve_dry_run(args, config)
@@ -50,17 +54,29 @@ def main(argv: list[str] | None = None) -> int:
         config["gmail"]["max_emails_per_run"] = args.max_emails
 
     if args.reauth_gmail:
+        progress.banner(
+            provider="Gmail OAuth",
+            mode="重新授权",
+            show_banner=bool(ui_config.get("banner_enabled", True)),
+        )
         progress.step("开始重新授权 Gmail OAuth")
         gmail = GmailClient(config, base_dir=base_dir, metrics=metrics)
         try:
             token_path = gmail.reauthorize()
         except GmailConnectionError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
+            progress.error(f"Error: {exc}")
+            progress.close()
             return 2
         progress.done(f"Gmail OAuth 重新授权完成：{token_path}")
+        progress.close()
         return 0
 
     sample_mode, warnings = _should_use_sample(args, config, dry_run, base_dir)
+    progress.banner(
+        provider=_ui_provider_label(config, sample_mode=sample_mode),
+        mode=_ui_run_mode(sample_mode=sample_mode, dry_run=dry_run),
+        show_banner=bool(ui_config.get("banner_enabled", True)),
+    )
     progress.step("初始化完成")
     llm = build_llm_client(config, sample_mode=sample_mode, metrics=metrics)
 
@@ -77,7 +93,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             emails = gmail.fetch_unread_emails(max_results=config["gmail"]["max_emails_per_run"])
         except GmailConnectionError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
+            progress.error(f"Error: {exc}")
+            progress.close()
             return 2
         unread_estimate = gmail.last_result_size_estimate
     if unread_estimate is None:
@@ -143,7 +160,8 @@ def main(argv: list[str] | None = None) -> int:
                 fuzzy_title_threshold=float(dedupe_config.get("fuzzy_title_threshold", 94)),
             )
         except PaperRegistryError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
+            progress.error(f"Error: {exc}")
+            progress.close()
             return 2
         if not registry.loaded_from_disk and bool(dedupe_config.get("bootstrap_from_outputs", True)):
             history_files, history_entries = bootstrap_registry_from_markdown(
@@ -250,7 +268,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             registry.save(reference_date=registry_date)
         except PaperRegistryError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
+            progress.error(f"Error: {exc}")
+            progress.close()
             return 2
 
     if not dry_run and not sample_mode and config["gmail"].get("mark_as_read", False):
@@ -259,14 +278,15 @@ def main(argv: list[str] | None = None) -> int:
         try:
             gmail.mark_as_read([email.id for email in accepted])
         except GmailConnectionError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
+            progress.error(f"Error: {exc}")
+            progress.close()
             return 2
 
     progress.done("运行完成")
-    print("Digest written:")
+    progress.output("Digest written:", style="bold")
     for output_path in output_paths:
-        print(f"  - {output_path}")
-    print(
+        progress.output(f"  - {output_path}")
+    progress.output(
         "Stats: "
         f"emails={stats.emails_read}, entries={stats.paper_entries_extracted}, "
         f"duplicates={stats.duplicates_removed}, high={stats.high_relevance}, "
@@ -275,16 +295,17 @@ def main(argv: list[str] | None = None) -> int:
     telemetry_config = config.get("telemetry", {})
     if bool(telemetry_config.get("show_compact_summary", True)):
         for line in metrics.summary_lines(include_request_details=False):
-            print(line)
+            progress.output(line)
     metrics_log_path = _write_detailed_metrics_log(
         metrics,
         base_dir=base_dir,
         config=telemetry_config,
     )
     if metrics_log_path is not None:
-        print(f"Detailed request metrics: {metrics_log_path}")
+        progress.output(f"Detailed request metrics: {metrics_log_path}", style="dim")
     if dry_run:
-        print("Dry-run mode: no email state was modified and no emails were sent.")
+        progress.output("Dry-run mode: no email state was modified and no emails were sent.")
+    progress.close()
     return 0
 
 
@@ -297,6 +318,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sample", action="store_true", help="Use built-in sample emails.")
     parser.add_argument("--date", help="Override output date label, e.g. 2026-04-28.")
     parser.add_argument("--quiet", action="store_true", help="Suppress progress messages.")
+    parser.add_argument("--no-color", action="store_true", help="Disable colors and animations.")
     parser.add_argument("--reauth-gmail", action="store_true", help="Force Gmail OAuth reauthorization.")
     return parser
 
@@ -363,38 +385,6 @@ def _resolve_path(value: str | Path, base_dir: Path) -> Path:
     return base_dir / path
 
 
-class ProgressReporter:
-    def __init__(self, *, enabled: bool = True, show_timestamps: bool = True) -> None:
-        self.enabled = enabled
-        self.show_timestamps = show_timestamps
-        self.started_at = perf_counter()
-
-    def step(self, message: str) -> None:
-        if not self.enabled:
-            return
-        print(f"{self._prefix()} {message}", flush=True)
-
-    def item(self, current: int, total: int, message: str) -> None:
-        if not self.enabled:
-            return
-        width = 24
-        ratio = current / total if total else 1
-        filled = min(width, max(0, int(width * ratio)))
-        bar = "#" * filled + "-" * (width - filled)
-        print(f"{self._prefix()} [{bar}] {current}/{total} {message}", flush=True)
-
-    def done(self, message: str) -> None:
-        if not self.enabled:
-            return
-        elapsed = perf_counter() - self.started_at
-        print(f"{self._prefix()} {message}，耗时 {elapsed:.1f}s", flush=True)
-
-    def _prefix(self) -> str:
-        if not self.show_timestamps:
-            return "[literature-digest]"
-        return f"[{datetime.now().strftime('%H:%M:%S')}]"
-
-
 def _shorten(value: str, max_length: int) -> str:
     text = " ".join((value or "(no subject)").split())
     if len(text) <= max_length:
@@ -445,6 +435,26 @@ def _format_duplicate_reasons(reasons: dict[str, int]) -> str:
         "fuzzy_title": "模糊标题",
     }
     return "，".join(f"{labels.get(reason, reason)} {count}" for reason, count in reasons.items())
+
+
+def _ui_provider_label(config: dict[str, Any], *, sample_mode: bool) -> str:
+    if sample_mode:
+        return "本地离线模型"
+    llm_config = config.get("llm", {})
+    provider = str(llm_config.get("provider") or "LLM")
+    model = str(llm_config.get("model") or "").strip()
+    labels = {
+        "codex_cli": "Codex CLI",
+        "openai_compatible": "OpenAI-compatible API",
+    }
+    label = labels.get(provider, provider)
+    return f"{label} · {model}" if model else label
+
+
+def _ui_run_mode(*, sample_mode: bool, dry_run: bool) -> str:
+    if sample_mode:
+        return "样例 dry-run"
+    return "dry-run" if dry_run else "正式运行"
 
 
 def _write_detailed_metrics_log(

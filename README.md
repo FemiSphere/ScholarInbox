@@ -14,6 +14,7 @@ ScholarPulse 是一个本地 Python 工作流：从专用 Gmail 邮箱读取 Goo
 - 同时输出 Markdown 与 HTML；HTML 支持搜索、相关性筛选、详情折叠和可用的 TOC 图片。
 - 支持 dry-run、样例数据、Gmail OAuth 重新授权、可配置代理和不含正文/密钥的请求级性能日志。
 - 排序与非 Scholar 抽取使用可配置的有限并发；Gmail 支持批量读取和批量已读标记。
+- 使用 Rich 提供交互式大标题、单区域动态进度和自动终端能力降级；`--no-color` 可关闭颜色与动画。
 
 ## 工作流
 
@@ -38,6 +39,8 @@ Gmail 学术提醒
 python -m pip install -e ".[dev]"
 cp config.example.yaml config.local.yaml
 ```
+
+Rich 已包含在项目依赖中，不需要单独安装。终端界面显示 `ScholarPulse`、中文题句、作者和从包元数据读取的软件版本。
 
 Windows PowerShell 可将第二条命令替换为：
 

@@ -167,6 +167,7 @@ scripts/run_digest_macos.sh
 - 设置 Python UTF-8 环境变量。
 - 将终端运行日志保存到 `logs/digest-YYYYMMDD-HHMMSS.log`。
 - 将逐请求耗时和 token 指标保存到 `logs/metrics/metrics-*.log`，终端只显示汇总。
+- 交互运行显示 Rich 大标题和动态进度；运行日志保持纯文本，不包含 ANSI 控制码。
 - 如果 shell 中配置了 `CODEX_PROXY_URL`、`CODEX_ALL_PROXY_URL`、`CODEX_NO_PROXY`，自动传给 Python 请求库。
 
 当前用户的 `~/.zshrc` 已写入：

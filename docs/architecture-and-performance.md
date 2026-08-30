@@ -35,6 +35,7 @@
 | `interests.py` | 研究兴趣读取、哈希缓存、LLM 提炼和本地回退 |
 | `ranking.py` | 可配置批大小与有限并发的排序、翻译和摘要 |
 | `telemetry.py` | 线程安全的 LLM/Gmail 请求指标；不保存 prompt 正文 |
+| `ui.py` | Rich 启动页、动态进度、终端降级和无 ANSI 运行日志 |
 | `digest.py` | Markdown/HTML 渲染和输出命名 |
 | `llm/` | Codex CLI、OpenAI-compatible API、退避重试和离线样例客户端 |
 
@@ -108,6 +109,14 @@ dry-run 判断仍在调用已读标记之前；优化没有放宽“不删除邮
 精确标识使用字典查询；只有精确匹配失败时才从共享标题 token 的小型候选集中执行 RapidFuzz。模糊匹配同时约束标题长度、token Jaccard、数字、化学式和 Part/Comment/Correction 等版本标记，避免 `token_set_ratio` 对包含关系的误判。
 
 索引按 `last_seen` 只保留近 30 天记录。正式运行在 Markdown/HTML 成功写出后原子更新 JSON；sample 和 dry-run 不写入。第一次启用时从近 30 天 Markdown 回填，之后记录所有成功解析的候选论文，而不只记录最终展示的论文。详细规则见 [`deduplication.md`](deduplication.md)。
+
+### 4.7 Rich 交互终端
+
+交互终端显示大尺寸 `ScholarPulse` 标识、“循此苦旅，以抵星辰。”、弱化的作者与包版本，并将逐邮件与逐批次输出收敛为单个动态进度区域。窄终端使用紧凑标题；非 TTY、`--no-color` 和 `NO_COLOR` 环境自动降级。
+
+macOS 启动脚本不再把 Python stdout 直接管道给 `tee`，避免 Rich 误判为非交互环境。`ProgressReporter` 直接写彩色终端，同时把稳定的无 ANSI 文本写入 `logs/digest-*.log`；stderr 仍追加到同一日志。详细请求指标继续单独写入 `logs/metrics/`。
+
+依赖整理后，Rich 是唯一新增的直接 UI 依赖；`markdown-it-py`、`mdurl` 和现有 `Pygments` 由其依赖关系安装。旧代码未使用的 `beautifulsoup4` 与 `python-dotenv` 已从项目声明和专用环境移除。
 
 ## 5. 离线基准与批大小判断
 

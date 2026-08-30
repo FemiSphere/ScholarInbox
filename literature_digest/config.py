@@ -92,6 +92,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": True,
         "show_timestamps": True,
     },
+    "ui": {
+        "banner_enabled": True,
+        "color_enabled": True,
+    },
     "telemetry": {
         "detailed_log_enabled": True,
         "log_dir": "logs/metrics",

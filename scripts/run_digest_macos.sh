@@ -29,6 +29,7 @@ mkdir -p "$LOG_DIR"
 
 TIMESTAMP="$(date +"%Y%m%d-%H%M%S")"
 LOG_FILE="$LOG_DIR/digest-$TIMESTAMP.log"
+export LITERATURE_DIGEST_RUN_LOG="$LOG_FILE"
 
 cd "$PROJECT_ROOT"
 
@@ -42,7 +43,11 @@ else
   PYTHON="$(command -v python3 || command -v python)"
 fi
 
-"$PYTHON" -m literature_digest "$@" 2>&1 | tee "$LOG_FILE"
+set +e
+"$PYTHON" -m literature_digest "$@" 2> >(tee -a "$LOG_FILE" >&2)
+EXIT_STATUS=$?
+set -e
 
-printf '\nLog saved to: %s\n' "$LOG_FILE"
-printf 'Output directory: %s\n' "$PROJECT_ROOT/outputs"
+printf '\nLog saved to: %s\n' "$LOG_FILE" | tee -a "$LOG_FILE"
+printf 'Output directory: %s\n' "$PROJECT_ROOT/outputs" | tee -a "$LOG_FILE"
+exit "$EXIT_STATUS"
