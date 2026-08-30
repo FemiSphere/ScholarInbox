@@ -57,18 +57,14 @@
 
 OpenAI-compatible 和 Codex CLI 请求都会记录用途、条目数、耗时、状态以及是否重试。API 返回 `usage` 时额外记录输入、输出、总 token 和缓存命中 token。日志只保存 prompt 字符数，不保存 prompt 正文、API key 或 OAuth 信息。
 
-运行结束会输出类似：
+终端在运行结束时只保留两行汇总，例如：
 
 ```text
 LLM metrics: requests=15, retries=1, errors=0, request_time_sum=240.12s, tokens=52340, cache_hit_tokens=1200
-  - email_extraction: requests=3, items=3, request_time_sum=18.20s
-  - paper_ranking: requests=12, items=240, request_time_sum=221.92s
-  request#1: operation=email_extraction, items=1, elapsed=5.84s, retry=false, status=ok, prompt_chars=6312, prompt_tokens=1540, completion_tokens=620, total_tokens=2160, cache_hit_tokens=n/a
 Gmail metrics: requests=4, items=101, request_time_sum=9.43s
-  request#1: operation=list_messages, items=1, elapsed=0.81s, status=ok
 ```
 
-`request_time_sum` 是各请求耗时之和；并发时会大于该阶段的墙钟时间，不能把它当作总运行时长。
+逐 operation 和逐 request 的耗时、token、缓存命中与状态写入 `logs/metrics/metrics-*.log`，不再刷满终端。日志只保存指标，不保存 prompt 正文。`request_time_sum` 是各请求耗时之和；并发时会大于该阶段的墙钟时间，不能把它当作总运行时长。
 
 ### 4.2 排序与邮件抽取有限并发
 
@@ -100,6 +96,8 @@ OpenAI-compatible 客户端对 HTTP 429、500、502、503、504 和临时网络�
 ### 4.5 Gmail I/O
 
 完整消息默认每 10 封组成一个 Gmail batch request，单批上限在代码中限制为 100。实测单批 50 个子请求会触发 Gmail per-user concurrent request 限制：50 个请求中曾有 14 个返回 HTTP 429。程序现在只对 429、5xx 和临时网络错误重试失败项，按 `1 s、2 s、4 s` 退避；永久错误仍终止运行并报告 HTTP 状态和原因。标记已读使用 `batchModify`，默认每批最多 1000 个 message ID。附件仍按需单独请求，因为它们只在 MIME part 没有内嵌数据时下载。
+
+Gmail `messages.list` 返回 `resultSizeEstimate` 后，终端显示“符合当前查询条件的未读邮件约 N 封；本次读取 M 封”。前者是 Gmail 提供的估计总数，后者受 `max_emails_per_run` 限制。
 
 dry-run 判断仍在调用已读标记之前；优化没有放宽“不删除邮件”或“不在 dry-run 修改邮件状态”的边界。
 

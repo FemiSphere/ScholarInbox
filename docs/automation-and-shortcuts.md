@@ -165,7 +165,8 @@ scripts/run_digest_macos.sh
 - 自动定位项目根目录。
 - 优先使用项目内 `.venv/bin/python`；如果不存在，则使用 `literature-digest-mac` conda 环境。
 - 设置 Python UTF-8 环境变量。
-- 将日志保存到 `logs/digest-YYYYMMDD-HHMMSS.log`。
+- 将终端运行日志保存到 `logs/digest-YYYYMMDD-HHMMSS.log`。
+- 将逐请求耗时和 token 指标保存到 `logs/metrics/metrics-*.log`，终端只显示汇总。
 - 如果 shell 中配置了 `CODEX_PROXY_URL`、`CODEX_ALL_PROXY_URL`、`CODEX_NO_PROXY`，自动传给 Python 请求库。
 
 当前用户的 `~/.zshrc` 已写入：

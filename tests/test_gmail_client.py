@@ -194,6 +194,32 @@ def test_fetch_unread_timeout_has_actionable_error(tmp_path, monkeypatch):
         client.fetch_unread_emails(max_results=1)
 
 
+def test_fetch_unread_exposes_gmail_result_size_estimate(tmp_path):
+    class ListRequest:
+        def execute(self):
+            return {"messages": [], "resultSizeEstimate": 137}
+
+    class FakeMessages:
+        def list(self, **kwargs):
+            return ListRequest()
+
+    class FakeUsers:
+        def messages(self):
+            return FakeMessages()
+
+    class FakeService:
+        def users(self):
+            return FakeUsers()
+
+    client = GmailClient(_config(), base_dir=tmp_path)
+    client._service = FakeService()
+
+    emails = client.fetch_unread_emails(max_results=100)
+
+    assert emails == []
+    assert client.last_result_size_estimate == 137
+
+
 def test_reauthorize_backs_up_existing_token_and_writes_new_token(tmp_path, monkeypatch):
     class FreshCredentials:
         def to_json(self):

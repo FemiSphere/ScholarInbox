@@ -42,6 +42,7 @@ class GmailClient:
         self.parsing_config = config["parsing"]
         self.metrics = metrics
         self._service = None
+        self.last_result_size_estimate: int | None = None
 
     @property
     def credentials_path(self) -> Path:
@@ -93,6 +94,7 @@ class GmailClient:
             "searching unread Gmail messages",
             metric_operation="list_messages",
         )
+        self.last_result_size_estimate = _optional_int(response.get("resultSizeEstimate"))
         messages = response.get("messages", [])
         message_ids = [message["id"] for message in messages]
         return self._fetch_emails(message_ids)
@@ -409,6 +411,13 @@ class GmailClient:
 
 def _decode_body_data(value: str) -> str:
     return _decode_body_bytes(value).decode("utf-8", errors="replace")
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        return max(0, int(value)) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _decode_body_bytes(value: str) -> bytes:

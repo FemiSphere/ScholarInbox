@@ -98,7 +98,7 @@ class RunMetrics:
         with self._lock:
             self._io_requests.append(metric)
 
-    def summary_lines(self) -> list[str]:
+    def summary_lines(self, *, include_request_details: bool = True) -> list[str]:
         llm_requests = self.llm_requests
         io_requests = self.io_requests
         lines: list[str] = []
@@ -113,33 +113,36 @@ class RunMetrics:
                 f"request_time_sum={sum(item.elapsed_seconds for item in llm_requests):.2f}s, "
                 f"tokens={total_tokens or 'n/a'}, cache_hit_tokens={cache_tokens or 'n/a'}"
             )
-            for operation in sorted({item.operation for item in llm_requests}):
-                group = [item for item in llm_requests if item.operation == operation]
-                lines.append(
-                    f"  - {operation}: requests={len(group)}, items={sum(item.item_count for item in group)}, "
-                    f"request_time_sum={sum(item.elapsed_seconds for item in group):.2f}s"
-                )
-            for index, item in enumerate(llm_requests, start=1):
-                lines.append(
-                    f"  request#{index}: operation={item.operation}, items={item.item_count}, "
-                    f"elapsed={item.elapsed_seconds:.2f}s, retry={str(item.retry).lower()}, "
-                    f"status={item.status}, prompt_chars={item.prompt_chars}, "
-                    f"prompt_tokens={item.prompt_tokens or 'n/a'}, "
-                    f"completion_tokens={item.completion_tokens or 'n/a'}, "
-                    f"total_tokens={item.total_tokens or 'n/a'}, "
-                    f"cache_hit_tokens={item.cache_hit_tokens or 'n/a'}"
-                )
+            if include_request_details:
+                for operation in sorted({item.operation for item in llm_requests}):
+                    group = [item for item in llm_requests if item.operation == operation]
+                    lines.append(
+                        f"  - {operation}: requests={len(group)}, "
+                        f"items={sum(item.item_count for item in group)}, "
+                        f"request_time_sum={sum(item.elapsed_seconds for item in group):.2f}s"
+                    )
+                for index, item in enumerate(llm_requests, start=1):
+                    lines.append(
+                        f"  request#{index}: operation={item.operation}, items={item.item_count}, "
+                        f"elapsed={item.elapsed_seconds:.2f}s, retry={str(item.retry).lower()}, "
+                        f"status={item.status}, prompt_chars={item.prompt_chars}, "
+                        f"prompt_tokens={item.prompt_tokens or 'n/a'}, "
+                        f"completion_tokens={item.completion_tokens or 'n/a'}, "
+                        f"total_tokens={item.total_tokens or 'n/a'}, "
+                        f"cache_hit_tokens={item.cache_hit_tokens or 'n/a'}"
+                    )
         if io_requests:
             lines.append(
                 "Gmail metrics: "
                 f"requests={len(io_requests)}, items={sum(item.item_count for item in io_requests)}, "
                 f"request_time_sum={sum(item.elapsed_seconds for item in io_requests):.2f}s"
             )
-            for index, item in enumerate(io_requests, start=1):
-                lines.append(
-                    f"  request#{index}: operation={item.operation}, items={item.item_count}, "
-                    f"elapsed={item.elapsed_seconds:.2f}s, status={item.status}"
-                )
+            if include_request_details:
+                for index, item in enumerate(io_requests, start=1):
+                    lines.append(
+                        f"  request#{index}: operation={item.operation}, items={item.item_count}, "
+                        f"elapsed={item.elapsed_seconds:.2f}s, status={item.status}"
+                    )
         return lines
 
 

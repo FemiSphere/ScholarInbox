@@ -138,7 +138,7 @@ python -m literature_digest --dry-run --max-emails 5
 - `config.local.yaml` 中 `gmail.mark_as_read: true`
 - 命令行使用 `--no-dry-run`
 
-项目不会删除邮件。输出写入 `outputs/`，日志写入 `logs/`。
+项目不会删除邮件。输出写入 `outputs/`，终端运行日志写入 `logs/`，逐请求性能指标写入 `logs/metrics/`。
 
 ## 一键运行
 

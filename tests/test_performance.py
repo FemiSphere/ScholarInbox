@@ -184,9 +184,13 @@ def test_metrics_aggregate_usage_without_storing_prompt_content():
 
     request = metrics.llm_requests[0]
     summary = "\n".join(metrics.summary_lines())
+    compact_summary = "\n".join(metrics.summary_lines(include_request_details=False))
     assert request.operation == "paper_ranking"
     assert request.item_count == 20
     assert request.total_tokens == 150
     assert request.cache_hit_tokens == 40
     assert "prompt" not in request.__dataclass_fields__
     assert "tokens=150" in summary
+    assert "request#1" in summary
+    assert "request#1" not in compact_summary
+    assert "paper_ranking" not in compact_summary

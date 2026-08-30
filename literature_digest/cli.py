@@ -67,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     if sample_mode:
         progress.step("读取内置样例邮件")
         emails = sample_emails()
+        unread_estimate = None
     else:
         progress.step(
             f"搜索 Gmail 未读邮件，query={config['gmail'].get('query', 'is:unread')!r}，"
@@ -78,7 +79,14 @@ def main(argv: list[str] | None = None) -> int:
         except GmailConnectionError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 2
-    progress.step(f"邮件读取完成：{len(emails)} 封")
+        unread_estimate = gmail.last_result_size_estimate
+    if unread_estimate is None:
+        progress.step(f"邮件读取完成：{len(emails)} 封")
+    else:
+        progress.step(
+            f"邮箱中符合当前查询条件的未读邮件约 {unread_estimate} 封；"
+            f"本次读取 {len(emails)} 封"
+        )
 
     skipped: list[SkippedEmail] = []
     accepted = []
@@ -264,8 +272,17 @@ def main(argv: list[str] | None = None) -> int:
         f"duplicates={stats.duplicates_removed}, high={stats.high_relevance}, "
         f"medium={stats.medium_relevance}, low={stats.low_relevance}, skipped={stats.skipped_emails}"
     )
-    for line in metrics.summary_lines():
-        print(line)
+    telemetry_config = config.get("telemetry", {})
+    if bool(telemetry_config.get("show_compact_summary", True)):
+        for line in metrics.summary_lines(include_request_details=False):
+            print(line)
+    metrics_log_path = _write_detailed_metrics_log(
+        metrics,
+        base_dir=base_dir,
+        config=telemetry_config,
+    )
+    if metrics_log_path is not None:
+        print(f"Detailed request metrics: {metrics_log_path}")
     if dry_run:
         print("Dry-run mode: no email state was modified and no emails were sent.")
     return 0
@@ -428,3 +445,26 @@ def _format_duplicate_reasons(reasons: dict[str, int]) -> str:
         "fuzzy_title": "模糊标题",
     }
     return "，".join(f"{labels.get(reason, reason)} {count}" for reason, count in reasons.items())
+
+
+def _write_detailed_metrics_log(
+    metrics: RunMetrics,
+    *,
+    base_dir: Path,
+    config: dict[str, Any],
+) -> Path | None:
+    if not bool(config.get("detailed_log_enabled", True)):
+        return None
+    lines = metrics.summary_lines(include_request_details=True)
+    if not lines:
+        return None
+    log_dir = _resolve_path(config.get("log_dir", "logs/metrics"), base_dir)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    target = log_dir / f"metrics-{timestamp}.log"
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError as exc:
+        print(f"Warning: could not write detailed metrics log: {exc}", file=sys.stderr)
+        return None
+    return target

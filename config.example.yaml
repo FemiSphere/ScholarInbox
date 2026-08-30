@@ -112,6 +112,12 @@ progress:
   enabled: true
   show_timestamps: true
 
+telemetry:
+  # 终端只显示汇总；逐请求耗时、token 和缓存命中保存到独立日志。
+  detailed_log_enabled: true
+  log_dir: "logs/metrics"
+  show_compact_summary: true
+
 performance:
   # LLM 请求有限并发；遇到限流可降为 2，设为 1 可恢复串行。
   parsing_max_workers: 3

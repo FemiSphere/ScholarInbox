@@ -92,6 +92,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": True,
         "show_timestamps": True,
     },
+    "telemetry": {
+        "detailed_log_enabled": True,
+        "log_dir": "logs/metrics",
+        "show_compact_summary": True,
+    },
     "performance": {
         "parsing_max_workers": 3,
         "ranking_max_workers": 3,
