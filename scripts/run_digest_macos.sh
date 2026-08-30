@@ -1,5 +1,8 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
+
+# Keep the launcher usable even when a terminal profile overwrites PATH.
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 export PYTHONIOENCODING=utf-8
 export PYTHONUTF8=1
