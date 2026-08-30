@@ -15,7 +15,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "token_path": "token.json",
         "request_timeout_seconds": 30,
         "proxy_url": "",
-        "batch_fetch_size": 50,
+        "batch_fetch_size": 10,
+        "batch_fetch_max_retries": 3,
+        "batch_fetch_retry_backoff_seconds": 1.0,
         "batch_modify_size": 1000,
     },
     "llm": {

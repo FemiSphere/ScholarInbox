@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from time import perf_counter
+from time import perf_counter, sleep
 from typing import Any
 
 from .models import EmailMessage
@@ -171,30 +171,60 @@ class GmailClient:
     def _fetch_emails(self, message_ids: list[str]) -> list[EmailMessage]:
         if not message_ids:
             return []
-        batch_size = max(1, min(100, int(self.gmail_config.get("batch_fetch_size", 50))))
+        batch_size = max(1, min(100, int(self.gmail_config.get("batch_fetch_size", 10))))
         service = self._get_service()
         if batch_size == 1 or not hasattr(service, "new_batch_http_request"):
             return [self.fetch_email(message_id) for message_id in message_ids]
 
         messages_by_id: dict[str, dict[str, Any]] = {}
+        max_retries = max(0, int(self.gmail_config.get("batch_fetch_max_retries", 3)))
+        retry_backoff = max(
+            0.0,
+            float(self.gmail_config.get("batch_fetch_retry_backoff_seconds", 1.0)),
+        )
         for offset in range(0, len(message_ids), batch_size):
             chunk = message_ids[offset : offset + batch_size]
-            failures: dict[str, BaseException] = {}
+            pending = list(chunk)
+            for attempt in range(max_retries + 1):
+                failures: dict[str, BaseException] = {}
 
-            def callback(request_id, response, exception):
-                if exception is not None:
-                    failures[str(request_id)] = exception
-                elif isinstance(response, dict):
-                    messages_by_id[str(request_id)] = response
+                def callback(request_id, response, exception):
+                    request_key = str(request_id)
+                    if exception is not None:
+                        failures[request_key] = exception
+                    elif isinstance(response, dict):
+                        messages_by_id[request_key] = response
 
-            batch = service.new_batch_http_request(callback=callback)
-            for message_id in chunk:
-                request = service.users().messages().get(userId="me", id=message_id, format="full")
-                batch.add(request, request_id=message_id)
-            self._execute_batch(batch, item_count=len(chunk))
-            if failures:
-                failed_ids = ", ".join(failures)[:240]
-                raise GmailConnectionError(f"Gmail batch message fetch failed for: {failed_ids}")
+                batch = service.new_batch_http_request(callback=callback)
+                for message_id in pending:
+                    request = service.users().messages().get(
+                        userId="me",
+                        id=message_id,
+                        format="full",
+                    )
+                    batch.add(request, request_id=message_id)
+                self._execute_batch(batch, item_count=len(pending))
+
+                permanent = {
+                    message_id: exception
+                    for message_id, exception in failures.items()
+                    if not _is_retryable_batch_error(exception)
+                }
+                if permanent:
+                    raise GmailConnectionError(_batch_failure_message(permanent, exhausted=False))
+
+                pending = list(failures)
+                if not pending:
+                    break
+                if attempt >= max_retries:
+                    raise GmailConnectionError(_batch_failure_message(failures, exhausted=True))
+
+                delay = _batch_retry_delay(
+                    failures.values(),
+                    fallback=retry_backoff * (2**attempt),
+                )
+                if delay > 0:
+                    sleep(delay)
 
         missing = [message_id for message_id in message_ids if message_id not in messages_by_id]
         if missing:
@@ -437,6 +467,41 @@ def _connection_error_message(action: str, detail: str | None = None) -> str:
     if detail:
         message += f" Detail: {detail}"
     return message
+
+
+def _is_retryable_batch_error(exception: BaseException) -> bool:
+    status = getattr(getattr(exception, "resp", None), "status", None)
+    return status in {429, 500, 502, 503, 504} or isinstance(exception, (OSError, TimeoutError))
+
+
+def _batch_retry_delay(exceptions, *, fallback: float) -> float:
+    retry_after = 0.0
+    for exception in exceptions:
+        response = getattr(exception, "resp", None)
+        if response is None or not hasattr(response, "get"):
+            continue
+        try:
+            retry_after = max(retry_after, float(response.get("retry-after", 0) or 0))
+        except (TypeError, ValueError):
+            continue
+    return min(30.0, max(retry_after, fallback))
+
+
+def _batch_failure_message(
+    failures: dict[str, BaseException],
+    *,
+    exhausted: bool,
+) -> str:
+    first_exception = next(iter(failures.values()))
+    status = getattr(getattr(first_exception, "resp", None), "status", None)
+    reason = getattr(first_exception, "reason", None) or type(first_exception).__name__
+    failed_ids = ", ".join(failures)[:180]
+    stage = "after retrying" if exhausted else "with a non-retryable error"
+    status_text = f"HTTP {status}: " if status is not None else ""
+    return (
+        f"Gmail batch message fetch failed {stage} for {len(failures)} request(s): "
+        f"{status_text}{reason}. Message IDs: {failed_ids}"
+    )
 
 
 def _proxy_info(httplib2_module, gmail_config: dict[str, Any]):

@@ -31,8 +31,13 @@ gmail:
   # 示例："http://127.0.0.1:7897"
   proxy_url: ""
 
-  # 批量下载完整邮件；设为 1 可关闭 Gmail batch。
-  batch_fetch_size: 50
+  # Gmail batch 会并发执行子请求；过大容易触发 per-user concurrent request 429。
+  # 设为 1 可关闭 Gmail batch。
+  batch_fetch_size: 10
+
+  # 仅重试 429、5xx 和临时网络错误；永久错误不会静默跳过。
+  batch_fetch_max_retries: 3
+  batch_fetch_retry_backoff_seconds: 1.0
 
   # Gmail batchModify 单次最多处理 1000 封；不影响 dry-run 边界。
   batch_modify_size: 1000

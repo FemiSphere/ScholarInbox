@@ -288,6 +288,124 @@ def test_fetch_emails_uses_batch_request_and_preserves_order(tmp_path):
     assert [email.subject for email in emails] == ["subject-a", "subject-b", "subject-c"]
 
 
+def test_fetch_emails_retries_only_transient_batch_failures(tmp_path):
+    class FakeResponse(dict):
+        status = 429
+
+    class TransientError(Exception):
+        resp = FakeResponse()
+        reason = "Too many concurrent requests for user."
+
+    class MessageRequest:
+        def __init__(self, message_id):
+            self.message_id = message_id
+
+    class FakeMessages:
+        def get(self, **kwargs):
+            return MessageRequest(kwargs["id"])
+
+    class FakeUsers:
+        def messages(self):
+            return FakeMessages()
+
+    class FakeBatch:
+        def __init__(self, service, callback):
+            self.service = service
+            self.callback = callback
+            self.requests = []
+
+        def add(self, request, request_id):
+            self.requests.append((request, request_id))
+
+        def execute(self):
+            self.service.batch_ids.append([request_id for _, request_id in self.requests])
+            for request, request_id in self.requests:
+                if request_id == "b" and len(self.service.batch_ids) == 1:
+                    self.callback(request_id, None, TransientError())
+                else:
+                    self.callback(request_id, _message_payload(request.message_id), None)
+
+    class FakeService:
+        def __init__(self):
+            self.batch_ids = []
+
+        def users(self):
+            return FakeUsers()
+
+        def new_batch_http_request(self, callback):
+            return FakeBatch(self, callback)
+
+    config = _config()
+    config["gmail"].update(
+        {
+            "batch_fetch_size": 3,
+            "batch_fetch_max_retries": 2,
+            "batch_fetch_retry_backoff_seconds": 0,
+        }
+    )
+    service = FakeService()
+    client = GmailClient(config, base_dir=tmp_path)
+    client._service = service
+
+    emails = client._fetch_emails(["a", "b", "c"])
+
+    assert [email.id for email in emails] == ["a", "b", "c"]
+    assert service.batch_ids == [["a", "b", "c"], ["b"]]
+
+
+def test_fetch_emails_does_not_retry_permanent_batch_failure(tmp_path):
+    class FakeResponse(dict):
+        status = 404
+
+    class PermanentError(Exception):
+        resp = FakeResponse()
+        reason = "Message not found."
+
+    class MessageRequest:
+        pass
+
+    class FakeMessages:
+        def get(self, **kwargs):
+            return MessageRequest()
+
+    class FakeUsers:
+        def messages(self):
+            return FakeMessages()
+
+    class FakeBatch:
+        def __init__(self, callback):
+            self.callback = callback
+            self.requests = []
+
+        def add(self, request, request_id):
+            self.requests.append(request_id)
+
+        def execute(self):
+            for request_id in self.requests:
+                self.callback(request_id, None, PermanentError())
+
+    class FakeService:
+        def users(self):
+            return FakeUsers()
+
+        def new_batch_http_request(self, callback):
+            return FakeBatch(callback)
+
+    config = _config()
+    config["gmail"].update(
+        {
+            "batch_fetch_size": 2,
+            "batch_fetch_max_retries": 3,
+            "batch_fetch_retry_backoff_seconds": 0,
+        }
+    )
+    client = GmailClient(config, base_dir=tmp_path)
+    client._service = FakeService()
+
+    with pytest.raises(GmailConnectionError, match="HTTP 404: Message not found"):
+        client._fetch_emails(["a", "b"])
+
+
 def test_mark_as_read_uses_batch_modify(tmp_path):
     captured = []
 
@@ -319,6 +437,20 @@ def test_mark_as_read_uses_batch_modify(tmp_path):
         {"ids": ["a", "b"], "removeLabelIds": ["UNREAD"]},
         {"ids": ["c"], "removeLabelIds": ["UNREAD"]},
     ]
+
+
+def _message_payload(message_id):
+    return {
+        "id": message_id,
+        "threadId": f"thread-{message_id}",
+        "labelIds": ["UNREAD"],
+        "payload": {
+            "headers": [
+                {"name": "Subject", "value": f"subject-{message_id}"},
+                {"name": "From", "value": "journal@example.org"},
+            ]
+        },
+    }
 
 
 def _config():

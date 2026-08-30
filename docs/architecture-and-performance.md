@@ -99,7 +99,7 @@ OpenAI-compatible 客户端对 HTTP 429、500、502、503、504 和临时网络�
 
 ### 4.5 Gmail I/O
 
-完整消息默认每 50 封组成一个 Gmail batch request，单批上限在代码中限制为 100。标记已读改为 `batchModify`，默认每批最多 1000 个 message ID。附件仍按需单独请求，因为它们只在 MIME part 没有内嵌数据时下载。
+完整消息默认每 10 封组成一个 Gmail batch request，单批上限在代码中限制为 100。实测单批 50 个子请求会触发 Gmail per-user concurrent request 限制：50 个请求中曾有 14 个返回 HTTP 429。程序现在只对 429、5xx 和临时网络错误重试失败项，按 `1 s、2 s、4 s` 退避；永久错误仍终止运行并报告 HTTP 状态和原因。标记已读使用 `batchModify`，默认每批最多 1000 个 message ID。附件仍按需单独请求，因为它们只在 MIME part 没有内嵌数据时下载。
 
 dry-run 判断仍在调用已读标记之前；优化没有放宽“不删除邮件”或“不在 dry-run 修改邮件状态”的边界。
 
