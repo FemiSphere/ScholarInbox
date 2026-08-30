@@ -442,12 +442,19 @@ def _ui_provider_label(config: dict[str, Any], *, sample_mode: bool) -> str:
         return "本地离线模型"
     llm_config = config.get("llm", {})
     provider = str(llm_config.get("provider") or "LLM")
-    model = str(llm_config.get("model") or "").strip()
+    provider_config = llm_config.get(provider, {})
+    if not isinstance(provider_config, dict):
+        provider_config = {}
+    model = str(provider_config.get("model") or llm_config.get("model") or "").strip()
     labels = {
         "codex_cli": "Codex CLI",
-        "openai_compatible": "OpenAI-compatible API",
+        "openai_compatible": "自定义 API",
     }
     label = labels.get(provider, provider)
+    if provider == "openai_compatible":
+        base_url = str(provider_config.get("base_url") or "").lower()
+        if "deepseek.com" in base_url:
+            label = "DeepSeek API"
     return f"{label} · {model}" if model else label
 
 
