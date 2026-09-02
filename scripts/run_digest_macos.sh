@@ -36,10 +36,22 @@ export LITERATURE_DIGEST_RUN_LOG="$LOG_FILE"
 
 cd "$PROJECT_ROOT"
 
-CONDA_BASE=""
-if command -v conda >/dev/null 2>&1; then
-  CONDA_BASE="$(conda info --base 2>/dev/null || true)"
+CONDA_COMMAND=""
+if [[ -n "${CONDA_EXE:-}" && -x "$CONDA_EXE" ]]; then
+  CONDA_COMMAND="$CONDA_EXE"
+elif command -v conda >/dev/null 2>&1; then
+  CONDA_COMMAND="$(command -v conda)"
+elif [[ -x "/opt/homebrew/bin/conda" ]]; then
+  CONDA_COMMAND="/opt/homebrew/bin/conda"
+elif [[ -x "/usr/local/bin/conda" ]]; then
+  CONDA_COMMAND="/usr/local/bin/conda"
 fi
+
+CONDA_BASE=""
+if [[ -n "$CONDA_COMMAND" ]]; then
+  CONDA_BASE="$("$CONDA_COMMAND" info --base 2>/dev/null || true)"
+fi
+
 CONDA_ENV_PYTHON="${CONDA_BASE:+$CONDA_BASE/envs/scholar-inbox-mac/bin/python}"
 LEGACY_CONDA_ENV_PYTHON="${CONDA_BASE:+$CONDA_BASE/envs/literature-digest-mac/bin/python}"
 
@@ -50,8 +62,23 @@ elif [[ -x "$CONDA_ENV_PYTHON" ]]; then
 elif [[ -x "$LEGACY_CONDA_ENV_PYTHON" ]]; then
   PYTHON="$LEGACY_CONDA_ENV_PYTHON"
 else
-  PYTHON="$(command -v python3 || command -v python)"
+  PYTHON="$(command -v python3 || command -v python || true)"
 fi
+
+if [[ -z "$PYTHON" ]]; then
+  printf 'Error: ScholarInbox requires Python 3.10 or newer, but no Python interpreter was found.\n' \
+    | tee -a "$LOG_FILE" >&2
+  exit 2
+fi
+
+if ! "$PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
+  PYTHON_VERSION="$("$PYTHON" --version 2>&1 || true)"
+  printf 'Error: ScholarInbox requires Python 3.10 or newer; detected %s at %s.\n' \
+    "$PYTHON_VERSION" "$PYTHON" | tee -a "$LOG_FILE" >&2
+  exit 2
+fi
+
+printf 'Python interpreter: %s\n' "$PYTHON" >> "$LOG_FILE"
 
 set +e
 "$PYTHON" -m literature_digest "$@" 2> >(tee -a "$LOG_FILE" >&2)
