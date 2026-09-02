@@ -114,6 +114,40 @@ def test_cli_reports_unread_estimate(tmp_path, monkeypatch, capsys):
     assert "邮箱中符合当前查询条件的未读邮件约 137 封；本次读取 1 封" in output
 
 
+def test_zero_emails_stops_before_llm_and_digest(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    config_path = _write_config(tmp_path)
+    config = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
+    config["progress"]["enabled"] = True
+    (tmp_path / "config.json").write_text(json.dumps(config), encoding="utf-8")
+
+    def fake_fetch(self, max_results):
+        self.last_result_size_estimate = 0
+        return []
+
+    monkeypatch.setattr(cli.GmailClient, "fetch_unread_emails", fake_fetch)
+    monkeypatch.setattr(
+        cli,
+        "build_llm_client",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("LLM client must not be built")),
+    )
+    monkeypatch.setattr(
+        cli,
+        "write_digests",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("digest must not be written")),
+    )
+
+    result = cli.main(["--config", config_path, "--dry-run", "--date", "2026-09-02"])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert "邮箱中符合当前查询条件的未读邮件约 0 封；本次读取 0 封" in output
+    assert "需要提取的邮件为 0，无需进行后续处理" in output
+    assert "Digest written:" not in output
+    assert not (tmp_path / "outputs").exists()
+    assert not (tmp_path / "data" / "paper_registry.json").exists()
+
+
 def test_detailed_metrics_are_written_to_log_only(tmp_path):
     metrics = RunMetrics()
     with llm_operation("paper_ranking", 20):

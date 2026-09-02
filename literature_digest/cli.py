@@ -78,7 +78,6 @@ def main(argv: list[str] | None = None) -> int:
         show_banner=bool(ui_config.get("banner_enabled", True)),
     )
     progress.step("初始化完成")
-    llm = build_llm_client(config, sample_mode=sample_mode, metrics=metrics)
 
     if sample_mode:
         progress.step("读取内置样例邮件")
@@ -104,6 +103,13 @@ def main(argv: list[str] | None = None) -> int:
             f"邮箱中符合当前查询条件的未读邮件约 {unread_estimate} 封；"
             f"本次读取 {len(emails)} 封"
         )
+
+    if not emails:
+        progress.done("需要提取的邮件为 0，无需进行后续处理")
+        progress.close()
+        return 0
+
+    llm = build_llm_client(config, sample_mode=sample_mode, metrics=metrics)
 
     skipped: list[SkippedEmail] = []
     accepted = []
