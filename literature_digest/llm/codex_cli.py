@@ -27,7 +27,7 @@ class CodexCLIClient:
     def complete(self, prompt: str) -> str:
         executable = _resolve_executable(self.executable)
         output_file = tempfile.NamedTemporaryFile(
-            prefix="literature-digest-codex-",
+            prefix="scholar-inbox-codex-",
             suffix=".txt",
             delete=False,
         )

@@ -418,7 +418,7 @@ def render_html(run: DigestRun, output_dir: str | Path | None = None) -> str:
     </section>
     <p class="empty" id="empty">当前筛选条件下没有匹配论文。</p>
     {'<section class="panel"><h2>跳过的邮件</h2><ul class="skipped-list">' + skipped_items + '</ul></section>' if skipped_items else ''}
-    <footer>由本地 literature_digest 工作流生成。Markdown 与 HTML 文件包含相同 digest 内容，HTML 额外提供搜索、筛选和图片浏览。</footer>
+    <footer>由本地 ScholarInbox 工作流生成。Markdown 与 HTML 文件包含相同 digest 内容，HTML 额外提供搜索、筛选和图片浏览。</footer>
   </main>
   <script type="application/json" id="digest-data">{escape(json.dumps(data, ensure_ascii=False))}</script>
   <script>

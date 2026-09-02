@@ -1,6 +1,6 @@
 # 跨日期去重设计
 
-ScholarPulse 使用 `data/paper_registry.json` 保存最近 30 天内见过的论文身份。它是普通 JSON 文件，不是数据库；启动时一次载入内存，正式输出成功后原子重写。
+ScholarInbox 使用 `data/paper_registry.json` 保存最近 30 天内见过的论文身份。它是普通 JSON 文件，不是数据库；启动时一次载入内存，正式输出成功后原子重写。
 
 ## 匹配顺序
 

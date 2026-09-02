@@ -1,6 +1,6 @@
-# ScholarPulse：把学术提醒邮件整理成中文文献摘要
+# ScholarInbox：把学术提醒邮件整理成个性化文献摘要
 
-ScholarPulse 是一个本地 Python 工作流：从专用 Gmail 邮箱读取 Google Scholar alerts、期刊目录、出版社推荐和 RSS 邮件，提取论文条目，去重并调用 LLM 完成中文翻译、摘要和相关性排序，最后生成 Markdown 与 HTML 阅读页。
+ScholarInbox 是一个面向科研用户的本地 Python 工作流：从专用 Gmail 邮箱读取 Google Scholar alerts、期刊目录、出版社推荐和 RSS 邮件，提取论文条目，去重并调用 LLM 完成中文翻译、摘要和相关性排序，最后生成 Markdown 与 HTML 阅读页。
 
 它的目标不是替代论文精读，而是把分散、重复的学术提醒先整理成一份可以快速筛选的阅读清单。
 
@@ -16,7 +16,7 @@ ScholarPulse 是一个本地 Python 工作流：从专用 Gmail 邮箱读取 Goo
 - 排序与非 Scholar 抽取使用可配置的有限并发；Gmail 支持批量读取和批量已读标记。
 - 使用 Rich 提供交互式大标题、单区域动态进度和自动终端能力降级；`--no-color` 可关闭颜色与动画。
 
-👉 [点击此处查看真实案例：输出的 HTML （建议右键新窗口打开查看） ](https://htmlpreview.github.io/?https://github.com/FemiSphere/ScholarPulse/blob/master/2026-04-30-digest.html)
+👉 [查看真实 HTML 输出示例](https://htmlpreview.github.io/?https://github.com/FemiSphere/ScholarInbox/blob/master/examples/2026-04-30-digest.html)
 
 ## 工作流
 
@@ -42,7 +42,7 @@ python -m pip install -e ".[dev]"
 cp config.example.yaml config.local.yaml
 ```
 
-Rich 已包含在项目依赖中，不需要单独安装。终端界面显示 `ScholarPulse`、中文题句、作者和从包元数据读取的软件版本。
+Rich 已包含在项目依赖中，不需要单独安装。终端界面显示 `ScholarInbox`、中文题句、作者和从包元数据读取的软件版本。
 
 Windows PowerShell 可将第二条命令替换为：
 

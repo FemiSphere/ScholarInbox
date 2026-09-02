@@ -111,7 +111,7 @@ scripts\run_digest.bat
 ```powershell
 $ProjectRoot = (Get-Location).Path
 $Desktop = [Environment]::GetFolderPath("Desktop")
-$ShortcutPath = Join-Path $Desktop "ScholarPulse.lnk"
+$ShortcutPath = Join-Path $Desktop "ScholarInbox.lnk"
 $Target = Join-Path $ProjectRoot "scripts\run_digest.bat"
 $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
@@ -121,7 +121,7 @@ $Shortcut.IconLocation = "$env:SystemRoot\System32\shell32.dll,220"
 $Shortcut.Save()
 ```
 
-之后桌面会出现 `ScholarPulse` 快捷方式，双击即可运行。
+之后桌面会出现 `ScholarInbox` 快捷方式，双击即可运行。
 
 ## 邮件积累较多时的建议
 
@@ -150,8 +150,8 @@ python -m literature_digest --dry-run --max-emails 50
 macOS 推荐使用独立 conda 环境，避免依赖系统自带 Python，也避免把完整运行环境放在项目目录里：
 
 ```zsh
-conda create -y -n literature-digest-mac python=3.11 pip
-conda run -n literature-digest-mac python -m pip install -e ".[dev]"
+conda create -y -n scholar-inbox-mac python=3.11 pip
+conda run -n scholar-inbox-mac python -m pip install -e ".[dev]"
 ```
 
 仓库提供 macOS 启动脚本：
@@ -163,17 +163,17 @@ scripts/run_digest_macos.sh
 脚本会：
 
 - 自动定位项目根目录。
-- 优先使用项目内 `.venv/bin/python`；如果不存在，则使用 `literature-digest-mac` conda 环境。
+- 优先使用项目内 `.venv/bin/python`；如果不存在，则使用 `scholar-inbox-mac` conda 环境。已有的 `literature-digest-mac` 环境仍可继续使用。
 - 设置 Python UTF-8 环境变量。
 - 将终端运行日志保存到 `logs/digest-YYYYMMDD-HHMMSS.log`。
 - 将逐请求耗时和 token 指标保存到 `logs/metrics/metrics-*.log`，终端只显示汇总。
 - 交互运行显示 Rich 大标题和动态进度；运行日志保持纯文本，不包含 ANSI 控制码。
 - 如果 shell 中配置了 `CODEX_PROXY_URL`、`CODEX_ALL_PROXY_URL`、`CODEX_NO_PROXY`，自动传给 Python 请求库。
 
-当前用户的 `~/.zshrc` 已写入：
+如需使用中文命令，可在 `~/.zshrc` 中加入下面的别名，并将路径替换为实际仓库位置：
 
 ```zsh
-alias 文献='/Users/xinyuan/Workbench/My-literature-digest/scripts/run_digest_macos.sh'
+alias 文献='/path/to/ScholarInbox/scripts/run_digest_macos.sh'
 ```
 
 打开新终端后可直接运行：

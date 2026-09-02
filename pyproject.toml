@@ -1,7 +1,7 @@
 [project]
-name = "literature-digest"
-version = "0.1.0"
-description = "Local daily academic literature digest workflow."
+name = "scholar-inbox"
+version = "0.2.0"
+description = "Turn academic alert emails into personalized literature digests."
 authors = [
   { name = "马心远" },
 ]
@@ -26,6 +26,7 @@ dev = [
 ]
 
 [project.scripts]
+scholar-inbox = "literature_digest.cli:main"
 literature-digest = "literature_digest.cli:main"
 
 [tool.setuptools.packages.find]
