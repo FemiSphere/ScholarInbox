@@ -16,6 +16,8 @@ ScholarPulse 是一个本地 Python 工作流：从专用 Gmail 邮箱读取 Goo
 - 排序与非 Scholar 抽取使用可配置的有限并发；Gmail 支持批量读取和批量已读标记。
 - 使用 Rich 提供交互式大标题、单区域动态进度和自动终端能力降级；`--no-color` 可关闭颜色与动画。
 
+👉 [点击此处查看真实案例：输出的 HTML （建议右键新窗口打开查看） ](https://htmlpreview.github.io/?https://github.com/FemiSphere/ScholarPulse/blob/master/2026-04-30-digest.html)
+
 ## 工作流
 
 ```text
