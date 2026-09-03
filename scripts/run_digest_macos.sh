@@ -8,7 +8,12 @@ export PYTHONIOENCODING=utf-8
 export PYTHONUTF8=1
 export PYTHONDONTWRITEBYTECODE=1
 
-if [[ -n "${CODEX_PROXY_URL:-}" && -z "${https_proxy:-}${HTTPS_PROXY:-}" ]]; then
+if [[ -n "${SCHOLAR_INBOX_PROXY_URL:-}" ]]; then
+  export http_proxy="$SCHOLAR_INBOX_PROXY_URL"
+  export https_proxy="$SCHOLAR_INBOX_PROXY_URL"
+  export HTTP_PROXY="$SCHOLAR_INBOX_PROXY_URL"
+  export HTTPS_PROXY="$SCHOLAR_INBOX_PROXY_URL"
+elif [[ -n "${CODEX_PROXY_URL:-}" && -z "${https_proxy:-}${HTTPS_PROXY:-}" ]]; then
   export http_proxy="$CODEX_PROXY_URL"
   export https_proxy="$CODEX_PROXY_URL"
   export HTTP_PROXY="$CODEX_PROXY_URL"
@@ -20,7 +25,12 @@ if [[ -n "${CODEX_ALL_PROXY_URL:-}" && -z "${all_proxy:-}${ALL_PROXY:-}" ]]; the
   export ALL_PROXY="$CODEX_ALL_PROXY_URL"
 fi
 
-if [[ -n "${CODEX_NO_PROXY:-}" && -z "${no_proxy:-}${NO_PROXY:-}" ]]; then
+if [[ -n "${SCHOLAR_INBOX_PROXY_URL:-}" ]]; then
+  SCHOLAR_INBOX_EFFECTIVE_NO_PROXY="${SCHOLAR_INBOX_NO_PROXY:-localhost,127.0.0.1,::1}"
+  export no_proxy="$SCHOLAR_INBOX_EFFECTIVE_NO_PROXY"
+  export NO_PROXY="$SCHOLAR_INBOX_EFFECTIVE_NO_PROXY"
+  unset SCHOLAR_INBOX_EFFECTIVE_NO_PROXY
+elif [[ -n "${CODEX_NO_PROXY:-}" && -z "${no_proxy:-}${NO_PROXY:-}" ]]; then
   export no_proxy="$CODEX_NO_PROXY"
   export NO_PROXY="$CODEX_NO_PROXY"
 fi

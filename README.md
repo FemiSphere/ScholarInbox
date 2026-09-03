@@ -1,63 +1,63 @@
-# ScholarInbox：把学术提醒邮件整理成个性化文献摘要
+<div align="center">
 
-ScholarInbox 是一个面向科研用户的本地 Python 工作流：从专用 Gmail 邮箱读取 Google Scholar alerts、期刊目录、出版社推荐和 RSS 邮件，提取论文条目，去重并调用 LLM 完成中文翻译、摘要和相关性排序，最后生成 Markdown 与 HTML 阅读页。
+# ScholarInbox
 
-它的目标不是替代论文精读，而是把分散、重复的学术提醒先整理成一份可以快速筛选的阅读清单。
+**把分散的学术提醒邮件，整理成可快速筛选的个性化文献摘要。**
 
-## 当前能力
+Gmail · Google Scholar · Codex / DeepSeek · Markdown + HTML
 
-- 读取 Gmail 未读邮件；不会删除邮件。
-- 解析 Google Scholar 和常见期刊/出版社邮件；非 Scholar 邮件可先由 LLM 做结构化抽取。
-- 按 DOI、arXiv ID、规范化 URL 和标题去重，并用轻量 JSON 索引过滤近 30 天已出现的论文。
-- 从 `research_interests.md` 提炼近期研究兴趣，据此生成高、中、低相关性和中文推荐理由。
-- 支持 Codex CLI 与 OpenAI-compatible API；当前示例包含 DeepSeek 配置。
-- 同时输出 Markdown 与 HTML；HTML 支持搜索、相关性筛选、详情折叠和可用的 TOC 图片。
-- 支持 dry-run、样例数据、Gmail OAuth 重新授权、可配置代理和不含正文/密钥的请求级性能日志。
-- 排序与非 Scholar 抽取使用可配置的有限并发；Gmail 支持批量读取和批量已读标记。
-- 使用 Rich 提供交互式大标题、单区域动态进度和自动终端能力降级；`--no-color` 可关闭颜色与动画。
+[在线示例](https://htmlpreview.github.io/?https://github.com/FemiSphere/ScholarInbox/blob/master/examples/2026-04-30-digest.html) ·
+[配置与快捷运行](docs/automation-and-shortcuts.md) ·
+[架构与性能](docs/architecture-and-performance.md)
 
-👉 [查看真实 HTML 输出示例](https://htmlpreview.github.io/?https://github.com/FemiSphere/ScholarInbox/blob/master/examples/2026-04-30-digest.html)
+> 循此苦旅，以抵星辰。
 
-## 工作流
+</div>
+
+ScholarInbox 是一个面向科研用户的本地 Python 工作流。它从 Gmail 中读取 Google Scholar、
+期刊目录和出版社提醒，提取论文信息、去重，并根据研究兴趣完成中文翻译、摘要和相关性排序。
+
+## 核心能力
+
+- 解析 Google Scholar 与常见期刊、出版社提醒邮件。
+- 按 DOI、arXiv ID、规范化 URL 和标题去重，并过滤近 30 天重复论文。
+- 根据 `research_interests.md` 生成高、中、低相关性及中文推荐理由。
+- 支持 Codex CLI 与 OpenAI-compatible API，示例包含 DeepSeek 配置。
+- 同时生成 Markdown 和可搜索、可筛选的 HTML 阅读页。
+- 提供 dry-run、离线样例、Gmail 批处理、可配置代理和纯文本运行日志。
 
 ```text
 Gmail 学术提醒
-  -> 邮件过滤
-  -> 论文条目解析
-  -> 当前批次去重 + 近 30 天 JSON 身份索引
-  -> 读取并提炼近期研究兴趣
-  -> LLM 分批排序、翻译和摘要
-  -> Markdown + HTML
-  -> 可选：成功后标记邮件已读
+  → 邮件过滤与论文提取
+  → 当前批次去重 + 近 30 天身份索引
+  → 研究兴趣匹配与 LLM 摘要
+  → Markdown + HTML
+  → 可选：成功后标记邮件已读
 ```
 
-实现边界、关键模块和当前性能分析见 [`docs/architecture-and-performance.md`](docs/architecture-and-performance.md)，跨日期去重规则见 [`docs/deduplication.md`](docs/deduplication.md)。
-
-## 安装
+## 快速开始
 
 需要 Python 3.10 或更高版本。
 
 ```bash
+git clone https://github.com/FemiSphere/ScholarInbox.git
+cd ScholarInbox
 python -m pip install -e ".[dev]"
 cp config.example.yaml config.local.yaml
 ```
 
-Rich 已包含在项目依赖中，不需要单独安装。终端界面显示 `ScholarInbox`、中文题句、作者和从包元数据读取的软件版本。
+先运行完全离线的样例检查；它不会读取 Gmail，也不会调用在线 LLM：
 
-Windows PowerShell 可将第二条命令替换为：
-
-```powershell
-Copy-Item config.example.yaml config.local.yaml
+```bash
+python -m literature_digest --dry-run --sample
 ```
 
-只修改 `config.local.yaml`。本地配置、OAuth 文件、密钥、运行数据、输出和日志均不应提交到 Git。
-
-## Gmail OAuth
+### Gmail OAuth
 
 1. 在 Google Cloud Console 启用 Gmail API。
-2. 创建 Desktop App 类型的 OAuth Client。
-3. 下载凭据并命名为 `credentials.json`，放在项目根目录。
-4. 第一次读取 Gmail 时，浏览器会打开授权页，成功后生成 `token.json`。
+2. 创建 **Desktop App** 类型的 OAuth Client。
+3. 将下载的凭据命名为 `credentials.json`，放入项目根目录。
+4. 首次读取 Gmail 时按浏览器提示授权；成功后会生成本地 `token.json`。
 
 授权失效或更换账号时运行：
 
@@ -65,133 +65,115 @@ Copy-Item config.example.yaml config.local.yaml
 python -m literature_digest --reauth-gmail
 ```
 
-旧 token 会先备份为 `token.backup-YYYYMMDD-HHMMSS.json`。网络、代理和 macOS/Windows 快捷运行说明见 [`docs/automation-and-shortcuts.md`](docs/automation-and-shortcuts.md)。
+### LLM
 
-## LLM 配置
-
-主配置只引用一个独立的 LLM 配置文件：
+在 `config.local.yaml` 中选择 LLM 配置文件：
 
 ```yaml
 llm:
   config_path: "config/llm/deepseek.local.yaml"
 ```
 
-可用模板：
+可从以下模板开始：
 
-- `config/llm/codex_cli.example.yaml`
 - `config/llm/deepseek.example.yaml`
+- `config/llm/codex_cli.example.yaml`
 
-使用 API 时，把真实 key 写入 `.env`，YAML 中只保留环境变量名：
-
-```env
-DEEPSEEK_API_KEY=your_api_key
-```
-
-DeepSeek 参数和 JSON 输出约束见 [`docs/deepseek-api-guide.md`](docs/deepseek-api-guide.md)。
-
-## 研究兴趣
-
-直接编辑 `research_interests.md`，用自然语言描述当前项目、材料体系、方法、物性和不关心的方向。程序会按兴趣文本和模型配置的哈希缓存结构化画像；只有内容或模型变化，或设置 `refresh_each_run: true` 时才重新调用 LLM。
-
-示例：
-
-```markdown
-我近期关注五边形框架材料的理论设计与物性研究，尤其是 COF/MOF/HOF、
-机器学习势函数、声子与热输运，以及 AI 辅助材料结构设计。
-```
-
-## 跨日期去重
-
-程序使用 `data/paper_registry.json` 保存最近 30 天内见过的论文身份。索引只保存标题别名、DOI、arXiv ID、规范化 URL、来源和日期，不保存邮件正文；`data/` 已被 Git 忽略。
-
-第一次启用时会从近 30 天 Markdown digest 回填。以后在正式运行成功生成输出后，程序会把本次解析出的全部候选论文写入索引，包括因展示数量限制而未出现在 digest 中的条目。sample 和 dry-run 只读取、不写入索引。
-
-详细匹配和保留规则见 [`docs/deduplication.md`](docs/deduplication.md)。
+API key 应写入本地 `.env`，不要直接写入可提交的 YAML。DeepSeek 配置说明见
+[`docs/deepseek-api-guide.md`](docs/deepseek-api-guide.md)。
 
 ## 运行
 
-先用内置样例验证本地链路；该命令不读取 Gmail，也不需要 LLM API key：
-
 ```bash
+# 离线样例
 python -m literature_digest --dry-run --sample
-```
 
-离线比较排序并发数和批大小：
-
-```bash
-python scripts/benchmark_performance.py
-```
-
-再小批量读取真实邮箱：
-
-```bash
+# 小批量读取真实邮箱，但不改变邮件状态
 python -m literature_digest --dry-run --max-emails 5
+
+# 按本地配置正式运行
+python -m literature_digest --no-dry-run
 ```
 
-常用参数：
+只有同时满足以下两个条件，程序才会把成功处理的邮件标记为已读：
 
-```text
---config PATH       指定主配置文件
---max-emails N      覆盖单次读取邮件数
---date YYYY-MM-DD   指定输出日期标签
---quiet             隐藏进度信息
---reauth-gmail      强制重新进行 Gmail OAuth
-```
+- `config.local.yaml` 中设置 `gmail.mark_as_read: true`；
+- 命令行使用 `--no-dry-run`。
 
-正式标记已读必须同时满足：
+程序不会删除邮件。结果写入 `outputs/`，日志写入 `logs/`，请求指标写入 `logs/metrics/`。
 
-- `config.local.yaml` 中 `gmail.mark_as_read: true`
-- 命令行使用 `--no-dry-run`
+## macOS 一键运行
 
-项目不会删除邮件。输出写入 `outputs/`，终端运行日志写入 `logs/`，逐请求性能指标写入 `logs/metrics/`。
-
-## 一键运行
-
-macOS：
+启动脚本会自动定位项目根目录，并依次查找项目 `.venv`、`scholar-inbox-mac` Conda 环境、
+兼容的旧环境 `literature-digest-mac` 和系统 Python：
 
 ```bash
 scripts/run_digest_macos.sh --dry-run --sample
 ```
 
-Windows：
+如需中文快捷命令，可在 `~/.zshrc` 中加入：
 
-```text
-scripts/run_digest.bat
-scripts/run_digest.ps1
+```zsh
+alias 文献='/path/to/ScholarInbox/scripts/run_digest_macos.sh'
 ```
 
-脚本会从自身位置定位项目根目录，因此仓库移动后通常不需要修改脚本内部路径。
+### 仅让 ScholarInbox 使用 Clash
 
-## 测试与提交前检查
+部分网络环境无法直连 Google OAuth 和 Gmail API。先在 Clash 中确认 **HTTP/Mixed** 监听地址，
+再在 `~/.zshrc` 中配置 ScholarInbox 专用变量：
+
+```zsh
+export SCHOLAR_INBOX_PROXY_URL="http://127.0.0.1:7897"
+alias 文献='/path/to/ScholarInbox/scripts/run_digest_macos.sh'
+```
+
+`7897` 只是示例；常见端口还有 `7890`，请以自己的 Clash 设置为准。重新打开终端或执行
+`source ~/.zshrc` 后，直接运行 `文献` 即可。
+
+这个专用变量不会让整个终端走代理。只有 `run_digest_macos.sh` 会在 ScholarInbox 子进程内
+临时设置 HTTP(S) 代理，命令退出后当前 shell 的代理状态不变。无需代理的用户不要设置该变量。
+
+可选的本地绕过地址：
+
+```zsh
+export SCHOLAR_INBOX_NO_PROXY="localhost,127.0.0.1,::1"
+```
+
+Windows 用户可使用 `scripts/run_digest.bat` 或 `scripts/run_digest.ps1`。更完整的快捷命令、
+Conda 环境和自动化说明见 [`docs/automation-and-shortcuts.md`](docs/automation-and-shortcuts.md)。
+
+## 数据与安全
+
+以下内容只应保留在本地，项目已通过 `.gitignore` 排除：
+
+- `.env`、`config.local.yaml`、`config/llm/*.local.yaml`
+- `credentials.json`、`token.json` 及其备份
+- `data/`、`outputs/`、`logs/`
+
+近 30 天去重索引位于 `data/paper_registry.json`，只保存论文身份信息，不保存邮件正文。
+sample 和 dry-run 不写入索引，也不会修改 Gmail 状态。
+
+## 文档
+
+| 文档 | 内容 |
+|---|---|
+| [配置、快捷运行与自动化](docs/automation-and-shortcuts.md) | macOS、Windows、Conda、代理和计划任务 |
+| [架构与性能](docs/architecture-and-performance.md) | 模块边界、并发、批处理、日志与性能 |
+| [跨日期去重](docs/deduplication.md) | 论文身份、匹配规则与 30 天索引 |
+| [DeepSeek API](docs/deepseek-api-guide.md) | 模型、参数、密钥和结构化输出配置 |
+
+## 开发与验证
 
 ```bash
 python -m pytest
+python -m compileall -q literature_digest
 python -m literature_digest --dry-run --sample
 ```
 
-确认命令成功，并确认 `outputs/` 中生成了新的 Markdown digest。
-
-## 安全约定
-
-以下文件或目录必须留在本地：
-
-- `.env`
-- `config.local.yaml` 及其备份
-- `config/llm/*.local.yaml`
-- `credentials.json`
-- `token.json` 及其备份
-- `Gmail_oauth*.md`
-- `data/`
-- `outputs/`
-- `logs/`
-
-错误信息和日志不得打印 API key、OAuth token、refresh token 或邮箱凭据。
+提交前应确认测试通过，并检查 `outputs/` 中生成的新 Markdown 与 HTML 摘要。
 
 ## 当前边界
 
-- 邮件格式适配仍是启发式与 LLM 结构化抽取的组合，不保证覆盖所有出版社模板。
-- 排序依据标题、来源、邮件片段和可见元数据，不等同于阅读全文后的学术评价。
-- LLM 并发默认限制为 3；若服务返回较多 429，可在 `performance` 中降为 2 或 1。实际速度仍受模型生成时间、输出长度和网络影响。
-- Gmail 完整消息默认每批读取 10 封；429/5xx 只重试失败项。若仍遇到 Gmail 并发限制，可在 `gmail.batch_fetch_size` 中继续降到 5 或 1。
-- Gmail 附件仍需按 MIME part 单独下载；批量邮件读取主要减少完整消息请求的往返次数。
-- 邮件回发尚未实现；当前完成的是本地 Markdown/HTML 输出和可选的已读标记。
+- 邮件模板解析由规则与 LLM 抽取共同完成，不保证覆盖所有出版社格式。
+- 相关性判断基于邮件中的标题、来源、摘要和可见元数据，不等同于论文精读。
+- Gmail 和 LLM 的速度、限流与可用性仍取决于外部服务和当前网络环境。

@@ -25,12 +25,13 @@ APP_NAME = "ScholarInbox"
 APP_QUOTE = "循此苦旅，以抵星辰。"
 APP_AUTHOR = __author__
 _LOGO = (
-    "  ____       _           _             ___       _                 ",
-    " / ___|  ___| |__   ___ | | __ _ _ __|_ _|_ __ | |__   _____  __  ",
-    " \\___ \\ / __| '_ \\ / _ \\| |/ _` | '__|| || '_ \\| '_ \\ / _ \\ \\/ /  ",
-    "  ___) | (__| | | | (_) | | (_| | |   | || | | | |_) | (_) >  <   ",
-    " |____/ \\___|_| |_|\\___/|_|\\__,_|_|  |___|_| |_|_.__/ \\___/_/\\_\\  ",
+    "█████ █████ █   █ █████ █      ███  ████  ███ █   █ ████  █████ █   █",
+    "█     █     █   █ █   █ █     █   █ █   █  █  ██  █ █   █ █   █  █ █ ",
+    "█████ █     █████ █   █ █     █████ ████   █  █ █ █ ████  █   █   █  ",
+    "    █ █     █   █ █   █ █     █   █ █  █   █  █  ██ █   █ █   █  █ █ ",
+    "█████ █████ █   █ █████ █████ █   █ █   █ ███ █   █ ████  █████ █   █",
 )
+_LOGO_MIN_CONSOLE_WIDTH = max(len(line) for line in _LOGO) + 6
 
 
 class ProgressReporter:
@@ -68,7 +69,7 @@ class ProgressReporter:
     def banner(self, *, provider: str, mode: str, show_banner: bool = True) -> None:
         metadata = f"{APP_AUTHOR} · v{__version__}"
         if self.enabled and show_banner:
-            if self._interactive and self.console.width >= 82:
+            if self._interactive and self.console.width >= _LOGO_MIN_CONSOLE_WIDTH:
                 logo = Align.center(_gradient_text("\n".join(_LOGO), "#8b5cf6", "#22d3ee"))
             else:
                 logo = Align.center(Text(APP_NAME, style="bold bright_cyan"))

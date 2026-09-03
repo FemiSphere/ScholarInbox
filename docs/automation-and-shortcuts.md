@@ -168,11 +168,12 @@ scripts/run_digest_macos.sh
 - 将终端运行日志保存到 `logs/digest-YYYYMMDD-HHMMSS.log`。
 - 将逐请求耗时和 token 指标保存到 `logs/metrics/metrics-*.log`，终端只显示汇总。
 - 交互运行显示 Rich 大标题和动态进度；运行日志保持纯文本，不包含 ANSI 控制码。
-- 如果 shell 中配置了 `CODEX_PROXY_URL`、`CODEX_ALL_PROXY_URL`、`CODEX_NO_PROXY`，自动传给 Python 请求库。
+- 如果配置了 `SCHOLAR_INBOX_PROXY_URL`，脚本只在 ScholarInbox 子进程内临时设置 HTTP(S) 代理；当前终端和其他命令不受影响。`SCHOLAR_INBOX_NO_PROXY` 可配置绕过地址。旧的 `CODEX_PROXY_URL`、`CODEX_ALL_PROXY_URL`、`CODEX_NO_PROXY` 仍兼容。
 
 如需使用中文命令，可在 `~/.zshrc` 中加入下面的别名，并将路径替换为实际仓库位置：
 
 ```zsh
+export SCHOLAR_INBOX_PROXY_URL="http://127.0.0.1:7897"  # 按自己的 Clash HTTP/Mixed 端口修改；无需代理时删除
 alias 文献='/path/to/ScholarInbox/scripts/run_digest_macos.sh'
 ```
 

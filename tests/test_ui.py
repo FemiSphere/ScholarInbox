@@ -27,7 +27,7 @@ def test_rich_banner_uses_large_logo_quote_and_dim_metadata(tmp_path):
 
     rendered = Text.from_ansi(output.getvalue()).plain
     log_text = log_path.read_text(encoding="utf-8")
-    assert "____" in rendered
+    assert "█████" in rendered
     assert APP_QUOTE in rendered
     assert f"{APP_AUTHOR} · v{__version__}" in rendered
     assert "Codex CLI · gpt-5.4-mini · 正式运行" in rendered
@@ -52,7 +52,7 @@ def test_narrow_terminal_falls_back_to_compact_name():
     rendered = Text.from_ansi(output.getvalue()).plain
     assert APP_NAME in rendered
     assert APP_QUOTE in rendered
-    assert "____" not in rendered
+    assert "█████" not in rendered
 
 
 def test_provider_label_uses_deepseek_runtime_model():
