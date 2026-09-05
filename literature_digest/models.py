@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 
-RelevanceLevel = Literal["high", "medium", "low"]
+RelevanceLevel = Literal["high", "medium", "low", "irrelevant"]
 
 
 @dataclass(slots=True)
@@ -85,6 +85,7 @@ class RunStats:
     high_relevance: int = 0
     medium_relevance: int = 0
     low_relevance: int = 0
+    irrelevant: int = 0
     sample_mode: bool = False
 
 

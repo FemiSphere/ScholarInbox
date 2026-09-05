@@ -96,10 +96,13 @@ digest:
   # false 时，同一天多次运行不会覆盖已有 digest，而是自动追加 -2、-3。
   overwrite_existing: false
   include_low_relevance: true
+  # 非学术推广或错误提取内容会归入“不相关”；HTML 中默认折叠。
+  include_irrelevant: true
   language: "zh-CN"
   max_high_relevance: 20
   max_medium_relevance: 30
   max_low_relevance: 80
+  max_irrelevant: 80
 
 safety:
   dry_run_default: true

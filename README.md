@@ -21,7 +21,7 @@ ScholarInbox 是一个面向科研用户的本地 Python 工作流。它从 Gmai
 
 - 解析 Google Scholar 与常见期刊、出版社提醒邮件。
 - 按 DOI、arXiv ID、规范化 URL 和标题去重，并过滤近 30 天重复论文。
-- 根据 `research_interests.md` 生成高、中、低相关性及中文推荐理由。
+- 根据 `research_interests.md` 生成高、中、低相关性及中文推荐理由；非学术内容单列为“不相关”。
 - 支持 Codex CLI 与 OpenAI-compatible API，示例包含 DeepSeek 配置。
 - 同时生成 Markdown 和可搜索、可筛选的 HTML 阅读页。
 - 提供 dry-run、离线样例、Gmail 批处理、可配置代理和纯文本运行日志。
@@ -101,6 +101,10 @@ python -m literature_digest --no-dry-run
 - 命令行使用 `--no-dry-run`。
 
 程序不会删除邮件。结果写入 `outputs/`，日志写入 `logs/`，请求指标写入 `logs/metrics/`。
+
+HTML 阅读页按相关性分区展示结果。“低相关”仍指研究方向之外的正常学术论文；推销、商业宣传、
+活动广告以及错误提取内容会进入默认折叠的“不相关”分区。邮件预过滤阶段直接拦截的推广邮件则
+继续记录在“跳过的邮件”中，便于检查过滤规则。
 
 ## macOS 一键运行
 

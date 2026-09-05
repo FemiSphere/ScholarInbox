@@ -40,6 +40,7 @@ class OfflineStubClient:
             ranked = []
             for item in papers:
                 text = f"{item.get('title', '')} {item.get('abstract', '')}".lower()
+                title = str(item.get("title", "")).lower()
                 score = 0.25
                 if any(term in text for term in ["pentagonal", "penta", "cof", "mof"]):
                     score += 0.35
@@ -47,7 +48,27 @@ class OfflineStubClient:
                     score += 0.25
                 if any(term in text for term in ["machine learning", "interatomic potential", "nep"]):
                     score += 0.2
-                relevance = "high" if score >= 0.75 else "medium" if score >= 0.45 else "low"
+                nonacademic = any(
+                    phrase in title
+                    for phrase in (
+                        "limited time offer",
+                        "buy now",
+                        "subscription offer",
+                        "register now",
+                        "product demo",
+                    )
+                )
+                relevance = (
+                    "irrelevant"
+                    if nonacademic
+                    else "high"
+                    if score >= 0.75
+                    else "medium"
+                    if score >= 0.45
+                    else "low"
+                )
+                if nonacademic:
+                    score = 0.0
                 ranked.append(
                     {
                         "index": item["index"],
@@ -56,7 +77,11 @@ class OfflineStubClient:
                         "title_zh": f"论文：{item.get('title', '')}",
                         "summary_zh": "这是本地离线 stub 生成的中文摘要，用于测试和 dry-run。",
                         "reason_zh": "这是本地离线 stub 生成的中文推荐理由，用于测试和 dry-run。",
-                        "matched_topics": ["pentagonal materials", "COF/MOF"] if relevance != "low" else [],
+                        "matched_topics": (
+                            ["pentagonal materials", "COF/MOF"]
+                            if relevance in {"high", "medium"}
+                            else []
+                        ),
                     }
                 )
             return json.dumps({"papers": ranked}, ensure_ascii=False)

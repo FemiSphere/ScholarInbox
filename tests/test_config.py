@@ -3,7 +3,7 @@ import json
 import urllib.error
 from pathlib import Path
 
-from literature_digest.config import load_config
+from literature_digest.config import DEFAULT_CONFIG, load_config
 from literature_digest.llm import LLMError
 from literature_digest.llm.base import extract_json_object
 from literature_digest.llm.openai_compatible import OpenAICompatibleClient
@@ -44,6 +44,11 @@ llm:
     assert config["llm"]["timeout_seconds"] == 300
     assert config["llm"]["openai_compatible"]["model"] == "deepseek-v4-flash"
     assert config["llm"]["openai_compatible"]["extra_body"]["thinking"]["type"] == "disabled"
+
+
+def test_default_digest_config_includes_irrelevant_outputs():
+    assert DEFAULT_CONFIG["digest"]["include_irrelevant"] is True
+    assert DEFAULT_CONFIG["digest"]["max_irrelevant"] == 80
 
 
 def test_openai_compatible_rejects_api_key_as_env_name():

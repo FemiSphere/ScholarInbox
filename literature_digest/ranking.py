@@ -102,8 +102,13 @@ Rules:
 - Never copy the English title unchanged into `title_zh`.
 - Never use placeholders such as "...", "N/A", or empty strings.
 - Keep formulas, chemical names, material abbreviations, model names, and Greek letters as needed.
-- `relevance` must be one of: "high", "medium", "low".
+- `relevance` must be one of: "high", "medium", "low", "irrelevant".
 - `score` must be a number from 0 to 1.
+- Use "low" for a genuine academic paper that is weakly related to the research interest profile.
+- Use "irrelevant" only when the entry is clearly not an academic paper, such as advertising,
+  sales or subscription promotion, product marketing, recruitment, event registration, or a
+  malformed extraction. A valid academic paper outside the user's field must remain "low".
+- For "irrelevant", use a score close to 0, keep the note short, and explain the non-academic signal.
 - Judge relevance only from the research interest profile and paper metadata.
 - `abstract` may be an incomplete email snippet, especially for Google Scholar alerts.
 - Do not invent details that are not present in the title, venue, snippet, DOI, or URL.
@@ -150,18 +155,31 @@ def _payload_by_index(payload: dict[str, Any]) -> dict[int, dict[str, Any]]:
 
 def _ranked_from_payload(entry: PaperEntry, payload: dict[str, Any]) -> RankedPaper:
     relevance = str(payload.get("relevance", "low")).lower()
-    if relevance not in {"high", "medium", "low"}:
+    if relevance not in {"high", "medium", "low", "irrelevant"}:
         relevance = "low"
     try:
         score = float(payload.get("score", 0.0))
     except (TypeError, ValueError):
         score = 0.0
 
+    academic_guard_applied = False
+    if _looks_clearly_nonacademic(entry):
+        relevance = "irrelevant"
+        score = 0.0
+    elif relevance == "irrelevant" and _has_strong_academic_identity(entry):
+        relevance = "low"
+        score = min(score, 0.24)
+        academic_guard_applied = True
+
     title_zh = _valid_generated_text(payload.get("title_zh"), original=entry.title)
     if not title_zh:
         title_zh = _fallback_title_translation(entry.title)
     summary_zh = _valid_generated_text(payload.get("summary_zh"))
     reason_zh = _valid_generated_text(payload.get("reason_zh"))
+    if academic_guard_applied:
+        reason_zh = "该条目具有 DOI 或 arXiv 等明确论文身份，因此保守保留为低相关学术论文。"
+    if relevance == "irrelevant" and not reason_zh:
+        reason_zh = "该条目包含明显的推广、活动或其他非学术信号，不属于论文推荐范围。"
     return RankedPaper(
         entry=entry,
         relevance=relevance,  # type: ignore[arg-type]
@@ -189,9 +207,25 @@ def _fallback_ranked_batch(
 
 def _fallback_ranked_paper(entry: PaperEntry, profile: InterestProfile, error_reason: str) -> RankedPaper:
     score, matched_topics = _heuristic_score(entry, profile)
-    relevance: RelevanceLevel = "high" if score >= 0.7 else "medium" if score >= 0.28 else "low"
-    topic_note = "、".join(matched_topics[:6]) if matched_topics else "未命中明显高优先级主题"
-    reason = f"LLM JSON 解析失败，已用本地规则按标题、期刊/来源和片段保守判断；命中：{topic_note}。"
+    clearly_nonacademic = _looks_clearly_nonacademic(entry)
+    relevance: RelevanceLevel = (
+        "irrelevant"
+        if clearly_nonacademic
+        else "high"
+        if score >= 0.7
+        else "medium"
+        if score >= 0.28
+        else "low"
+    )
+    if clearly_nonacademic:
+        score = 0.0
+        matched_topics = []
+        reason = "LLM JSON 解析失败；本地规则检测到明显的推广、订阅或其他非学术信号。"
+        summary = "该条目看起来不是学术论文，已归入“不相关”供审计。"
+    else:
+        topic_note = "、".join(matched_topics[:6]) if matched_topics else "未命中明显高优先级主题"
+        reason = f"LLM JSON 解析失败，已用本地规则按标题、期刊/来源和片段保守判断；命中：{topic_note}。"
+        summary = "LLM 未返回可解析的结构化结果；此处为本地规则生成的占位摘要，请优先查看英文原题、期刊/来源和原文链接。"
     if error_reason:
         reason += f" 错误摘要：{error_reason}"
     return RankedPaper(
@@ -199,7 +233,7 @@ def _fallback_ranked_paper(entry: PaperEntry, profile: InterestProfile, error_re
         relevance=relevance,
         score=score,
         title_zh=_fallback_title_translation(entry.title),
-        summary_zh="LLM 未返回可解析的结构化结果；此处为本地规则生成的占位摘要，请优先查看英文原题、期刊/来源和原文链接。",
+        summary_zh=summary,
         reason_zh=reason,
         matched_topics=matched_topics,
     )
@@ -259,6 +293,65 @@ def _heuristic_score(entry: PaperEntry, profile: InterestProfile) -> tuple[float
 
     score = max(0.0, min(score, 1.0))
     return round(score, 2), _dedupe_preserve_order(matched)
+
+
+_CLEARLY_NONACADEMIC_PATTERNS = (
+    "limited time offer",
+    "special offer",
+    "exclusive offer",
+    "subscription offer",
+    "renew your subscription",
+    "buy now",
+    "shop now",
+    "save up to",
+    "free trial",
+    "request a demo",
+    "product demo",
+    "register now",
+    "registration is open",
+    "reserve your seat",
+    "sponsored message",
+    "sponsored content",
+    "advertisement",
+    "career opportunity",
+    "job alert",
+    "now hiring",
+    "unsubscribe preferences",
+    "editorial board announcement and subscription information",
+    "限时优惠",
+    "特价促销",
+    "立即购买",
+    "订阅优惠",
+    "续订优惠",
+    "免费试用",
+    "预约演示",
+    "立即注册",
+    "职位推荐",
+    "招聘信息",
+    "推广内容",
+)
+
+
+def _looks_clearly_nonacademic(entry: PaperEntry) -> bool:
+    """Conservatively catch obvious non-paper entries when the LLM misses them."""
+
+    text = _normalize_text(
+        " ".join(
+            [
+                entry.title,
+                entry.venue,
+                entry.source_subject,
+            ]
+        )
+    )
+    return any(pattern in text for pattern in _CLEARLY_NONACADEMIC_PATTERNS)
+
+
+def _has_strong_academic_identity(entry: PaperEntry) -> bool:
+    if entry.doi.strip():
+        return True
+    text = _normalize_text(" ".join([entry.title, entry.venue, entry.url]))
+    return bool(re.search(r"(?:arxiv(?:\.org)?[:/\s]|\b\d{4}\.\d{4,5}\b)", text))
 
 
 def _profile_terms(profile: InterestProfile, *, deprioritized: bool = False) -> list[str]:

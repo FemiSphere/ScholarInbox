@@ -77,9 +77,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "output_dir": "outputs",
         "output_formats": ["md", "html"],
         "include_low_relevance": True,
+        "include_irrelevant": True,
         "language": "zh-CN",
         "max_high_relevance": 20,
         "max_medium_relevance": 30,
+        "max_irrelevant": 80,
     },
     "safety": {
         "dry_run_default": True,

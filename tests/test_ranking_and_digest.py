@@ -80,3 +80,60 @@ def test_ranking_failure_uses_local_relevance_heuristic_instead_of_all_low():
     assert ranked[0].summary_zh
     assert ranked[0].reason_zh
     assert ranked[-1].score <= ranked[0].score
+    assert ranked[-1].relevance == "irrelevant"
+    assert ranked[-1].score == 0.0
+
+
+class IrrelevantRankingClient:
+    def complete(self, prompt: str) -> str:
+        return ""
+
+    def complete_json(self, prompt: str):
+        return {
+            "papers": [
+                {
+                    "index": 0,
+                    "relevance": "irrelevant",
+                    "score": 0,
+                    "title_zh": "实验室软件订阅优惠",
+                    "summary_zh": "这是软件订阅推广。",
+                    "reason_zh": "属于商业推广，不是学术论文。",
+                    "matched_topics": [],
+                }
+            ]
+        }
+
+
+def test_ranking_accepts_irrelevant_as_a_distinct_category():
+    papers = [PaperEntry(title="Limited time offer for laboratory software")]
+
+    ranked = rank_papers(papers, InterestProfile(), IrrelevantRankingClient())
+
+    assert ranked[0].relevance == "irrelevant"
+    assert ranked[0].score == 0.0
+
+
+def test_genuine_academic_paper_outside_profile_remains_low():
+    papers = [
+        PaperEntry(
+            title="Tribological behavior of aluminium against tool steel",
+            venue="Journal of Tribology",
+            abstract="A peer-reviewed study of friction coefficients and wear.",
+        )
+    ]
+
+    ranked = rank_papers(papers, InterestProfile(), FailingRankingClient())
+
+    assert ranked[0].relevance == "low"
+
+
+def test_llm_cannot_mark_a_doi_paper_irrelevant_without_promotional_signals():
+    paper = PaperEntry(
+        title="Tribological behavior of aluminium against tool steel",
+        doi="10.1234/tribology.2026.001",
+    )
+
+    ranked = rank_papers([paper], InterestProfile(), IrrelevantRankingClient())
+
+    assert ranked[0].relevance == "low"
+    assert "明确论文身份" in ranked[0].reason_zh

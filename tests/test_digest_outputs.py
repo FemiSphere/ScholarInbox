@@ -102,3 +102,38 @@ def test_write_digests_can_avoid_overwriting_existing_outputs(tmp_path):
     assert tmp_path / "2026-04-28-digest-2.html" in paths
     assert existing_md.read_text(encoding="utf-8") == "existing md"
     assert existing_html.read_text(encoding="utf-8") == "existing html"
+
+
+def test_irrelevant_items_have_a_default_collapsed_html_section(tmp_path):
+    run = DigestRun(
+        date_label="2026-09-05",
+        stats=RunStats(paper_entries_extracted=1, irrelevant=1),
+        interest_profile=InterestProfile(summary_zh="测试"),
+        papers=[
+            RankedPaper(
+                entry=PaperEntry(
+                    title="Limited time subscription offer",
+                    source_subject="Publisher promotion",
+                    source_sender="marketing@example.org",
+                ),
+                relevance="irrelevant",
+                score=0.0,
+                title_zh="限时订阅优惠",
+                summary_zh="该内容为订阅推广。",
+                reason_zh="不是学术论文。",
+            )
+        ],
+    )
+
+    paths = write_digests(run, tmp_path, ["md", "html"])
+    markdown = (tmp_path / "2026-09-05-digest.md").read_text(encoding="utf-8")
+    html = (tmp_path / "2026-09-05-digest.html").read_text(encoding="utf-8")
+
+    assert len(paths) == 2
+    assert "## 不相关" in markdown
+    assert "- 不相关条目：1" in markdown
+    assert 'data-filter="irrelevant"' in html
+    assert '<details class="paper-section irrelevant-section" data-section-level="irrelevant">' in html
+    assert '<details class="paper-section irrelevant-section" data-section-level="irrelevant" open>' not in html
+    assert 'data-level="irrelevant"' in html
+    assert "activeFilter === 'irrelevant' || query" in html

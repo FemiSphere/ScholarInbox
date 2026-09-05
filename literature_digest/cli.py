@@ -241,6 +241,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if not config["digest"].get("include_low_relevance", True):
         ranked = [paper for paper in ranked if paper.relevance != "low"]
+    if not config["digest"].get("include_irrelevant", True):
+        ranked = [paper for paper in ranked if paper.relevance != "irrelevant"]
 
     stats = RunStats(
         emails_read=len(emails),
@@ -250,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
         high_relevance=count_relevance(ranked, "high"),
         medium_relevance=count_relevance(ranked, "medium"),
         low_relevance=count_relevance(ranked, "low"),
+        irrelevant=count_relevance(ranked, "irrelevant"),
         sample_mode=sample_mode,
     )
     run = DigestRun(
@@ -296,7 +299,8 @@ def main(argv: list[str] | None = None) -> int:
         "Stats: "
         f"emails={stats.emails_read}, entries={stats.paper_entries_extracted}, "
         f"duplicates={stats.duplicates_removed}, high={stats.high_relevance}, "
-        f"medium={stats.medium_relevance}, low={stats.low_relevance}, skipped={stats.skipped_emails}"
+        f"medium={stats.medium_relevance}, low={stats.low_relevance}, "
+        f"irrelevant={stats.irrelevant}, skipped={stats.skipped_emails}"
     )
     telemetry_config = config.get("telemetry", {})
     if bool(telemetry_config.get("show_compact_summary", True)):
@@ -365,7 +369,9 @@ def _apply_digest_limits(ranked, config: dict[str, Any]):
     medium_limit = int(config["digest"].get("max_medium_relevance", 30))
     raw_low_limit = config["digest"].get("max_low_relevance")
     low_limit = None if raw_low_limit is None else int(raw_low_limit)
-    high_count = medium_count = low_count = 0
+    raw_irrelevant_limit = config["digest"].get("max_irrelevant")
+    irrelevant_limit = None if raw_irrelevant_limit is None else int(raw_irrelevant_limit)
+    high_count = medium_count = low_count = irrelevant_count = 0
     result = []
     for paper in ranked:
         if paper.relevance == "high":
@@ -380,6 +386,10 @@ def _apply_digest_limits(ranked, config: dict[str, Any]):
             if low_limit is not None and low_count >= low_limit:
                 continue
             low_count += 1
+        elif paper.relevance == "irrelevant":
+            if irrelevant_limit is not None and irrelevant_count >= irrelevant_limit:
+                continue
+            irrelevant_count += 1
         result.append(paper)
     return result
 
