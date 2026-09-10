@@ -21,7 +21,7 @@ max_output_tokens: 4000
 openai_compatible:
   base_url: "https://api.deepseek.com"
   api_key_env: "DEEPSEEK_API_KEY"
-  model: "deepseek-v4-flash"
+  model: "deepseek-flash"
   extra_body:
     thinking:
       type: "disabled"
@@ -42,7 +42,7 @@ llm:
 
     assert config["llm"]["provider"] == "openai_compatible"
     assert config["llm"]["timeout_seconds"] == 300
-    assert config["llm"]["openai_compatible"]["model"] == "deepseek-v4-flash"
+    assert config["llm"]["openai_compatible"]["model"] == "deepseek-flash"
     assert config["llm"]["openai_compatible"]["extra_body"]["thinking"]["type"] == "disabled"
 
 
@@ -56,7 +56,7 @@ def test_openai_compatible_rejects_api_key_as_env_name():
     client = OpenAICompatibleClient(
         base_url="https://api.deepseek.com",
         api_key_env=fake_key,
-        model="deepseek-v4-flash",
+        model="deepseek-flash",
     )
 
     try:
@@ -75,7 +75,7 @@ class RetryJSONClient(OpenAICompatibleClient):
         super().__init__(
             base_url="https://api.deepseek.com",
             api_key_env="DEEPSEEK_API_KEY",
-            model="deepseek-v4-flash",
+            model="deepseek-flash",
         )
         self.calls = 0
 
@@ -100,7 +100,7 @@ class RetryMalformedJSONClient(OpenAICompatibleClient):
         super().__init__(
             base_url="https://api.deepseek.com",
             api_key_env="DEEPSEEK_API_KEY",
-            model="deepseek-v4-flash",
+            model="deepseek-flash",
         )
         self.calls = 0
 

@@ -62,12 +62,12 @@ def test_provider_label_uses_deepseek_runtime_model():
             "model": "gpt-5.4-mini",
             "openai_compatible": {
                 "base_url": "https://api.deepseek.com",
-                "model": "deepseek-v4-flash",
+                "model": "deepseek-flash",
             },
         }
     }
 
-    assert _ui_provider_label(config, sample_mode=False) == "DeepSeek API · deepseek-v4-flash"
+    assert _ui_provider_label(config, sample_mode=False) == "DeepSeek API · deepseek-flash"
 
 
 def test_provider_label_uses_custom_api_for_other_compatible_endpoints():

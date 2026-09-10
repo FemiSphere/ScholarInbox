@@ -47,7 +47,7 @@ https://api.deepseek.com
 
 模型名决定你调用哪个模型。DeepSeek 当前文档列出的主要模型是：
 
-- `deepseek-v4-flash`
+- `deepseek-flash`
 - `deepseek-v4-pro`
 
 文档也说明 `deepseek-chat` 和 `deepseek-reasoner` 将于 2026-07-24 弃用；新项目不建议再使用旧模型名。
@@ -55,7 +55,7 @@ https://api.deepseek.com
 本项目推荐使用：
 
 ```yaml
-model: "deepseek-v4-flash"
+model: "deepseek-flash"
 ```
 
 原因是文献摘要任务主要是分类、翻译和结构化输出，不需要最高等级推理；`v4-flash` 更适合低成本、低延迟运行。
@@ -243,7 +243,7 @@ max_output_tokens: 4000
 openai_compatible:
   base_url: "https://api.deepseek.com"
   api_key_env: "DEEPSEEK_API_KEY"
-  model: "deepseek-v4-flash"
+  model: "deepseek-flash"
   temperature: 0.2
   reasoning_effort: ""
   response_format_json: true
@@ -282,7 +282,7 @@ python -m literature_digest --dry-run --max-emails 5
 适合每周或每几天处理一次：
 
 ```yaml
-model: "deepseek-v4-flash"
+model: "deepseek-flash"
 temperature: 0.2
 max_output_tokens: 4000
 extra_body:
