@@ -95,6 +95,5 @@ set +e
 EXIT_STATUS=$?
 set -e
 
-printf '\nLog saved to: %s\n' "$LOG_FILE" | tee -a "$LOG_FILE"
-printf 'Output directory: %s\n' "$PROJECT_ROOT/outputs" | tee -a "$LOG_FILE"
+printf 'Exit status: %s\n' "$EXIT_STATUS" >> "$LOG_FILE"
 exit "$EXIT_STATUS"

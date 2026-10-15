@@ -111,7 +111,10 @@ def test_cli_reports_unread_estimate(tmp_path, monkeypatch, capsys):
 
     output = capsys.readouterr().out
     assert result == 0
-    assert "邮箱中符合当前查询条件的未读邮件约 137 封；本次读取 1 封" in output
+    assert "邮箱中符合当前查询条件" not in output
+    logs = list((tmp_path / "logs").glob("digest-*.log"))
+    assert len(logs) == 1
+    assert "邮箱中符合当前查询条件的未读邮件约 137 封；本次读取 1 封" in logs[0].read_text()
 
 
 def test_zero_emails_stops_before_llm_and_digest(tmp_path, monkeypatch, capsys):
@@ -141,7 +144,8 @@ def test_zero_emails_stops_before_llm_and_digest(tmp_path, monkeypatch, capsys):
 
     output = capsys.readouterr().out
     assert result == 0
-    assert "邮箱中符合当前查询条件的未读邮件约 0 封；本次读取 0 封" in output
+    log = next((tmp_path / "logs").glob("digest-*.log")).read_text()
+    assert "邮箱中符合当前查询条件的未读邮件约 0 封；本次读取 0 封" in log
     assert "需要提取的邮件为 0，无需进行后续处理" in output
     assert "Digest written:" not in output
     assert not (tmp_path / "outputs").exists()
@@ -167,3 +171,35 @@ def test_detailed_metrics_are_written_to_log_only(tmp_path):
     assert path is not None and path.exists()
     assert "request#1" not in compact
     assert "request#1: operation=paper_ranking" in path.read_text(encoding="utf-8")
+
+
+def test_degraded_api_run_preserves_unread_emails_and_registry(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    config_path = _write_config(tmp_path)
+    config = json.loads((tmp_path / "config.json").read_text())
+    config["gmail"]["mark_as_read"] = True
+    (tmp_path / "config.json").write_text(json.dumps(config))
+    _patch_external_clients(monkeypatch)
+    original_rank = cli.rank_papers
+
+    def degraded_rank(*args, **kwargs):
+        kwargs["event_callback"]("论文排序 1/1：LLM 失败（LLMError），回退本地规则")
+        return original_rank(*args, **kwargs)
+
+    def unexpected_mark(*args, **kwargs):
+        raise AssertionError("degraded output must not mark emails as read")
+
+    monkeypatch.setattr(cli, "rank_papers", degraded_rank)
+    monkeypatch.setattr(cli.GmailClient, "mark_as_read", unexpected_mark)
+    result = cli.main(["--config", config_path, "--no-dry-run", "--date", "2026-08-20", "--quiet"])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert not (tmp_path / "data" / "paper_registry.json").exists()
+    assert "本地规则回退" in output
+    assert "邮件保持未读" in output
+    digest = (tmp_path / "outputs" / "2026-08-20-digest.md").read_text()
+    assert "部分条目或推荐使用本地规则回退" in digest
+    log = next((tmp_path / "logs").glob("digest-*.log")).read_text()
+    assert "LLM 失败（LLMError）" in log
+    assert "LLM 失败（LLMError）" not in output

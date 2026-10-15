@@ -82,3 +82,48 @@ def test_provider_label_uses_custom_api_for_other_compatible_endpoints():
     }
 
     assert _ui_provider_label(config, sample_mode=False) == "自定义 API · custom-model"
+
+
+def test_request_details_are_log_only_and_safe_for_concurrent_writers(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    output = StringIO()
+    reporter = ProgressReporter(console=Console(file=output), run_log_path=tmp_path / "run.log")
+    reporter.step("解析论文条目")
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        list(executor.map(lambda i: reporter.detail(f"API request {i}"), range(12)))
+    reporter.close()
+
+    assert "API request" not in output.getvalue()
+    assert (tmp_path / "run.log").read_text().count("API request") == 12
+
+
+def test_interactive_progress_exists_before_first_completion_and_changes_stage():
+    output = StringIO()
+    reporter = ProgressReporter(console=Console(file=output, force_terminal=True, width=90, no_color=False, _environ={"TERM": "xterm-256color"}))
+    reporter.step("读取 Gmail 未读邮件")
+    assert reporter._progress.tasks[0].total is None
+    reporter.item(0, 20, "解析论文条目")
+    task = reporter._progress.tasks[0]
+    assert task.completed == 0 and task.total == 20
+    reporter.item(10, 20, "解析论文条目")
+    assert reporter._progress.tasks[0].completed == 10
+    reporter.step("保存文献日报")
+    assert reporter._progress.tasks[0].total is None
+    reporter.close()
+
+
+def test_plain_and_quiet_output_do_not_emit_animation_codes(tmp_path):
+    for enabled in (False, True):
+        output = StringIO()
+        reporter = ProgressReporter(
+            enabled=enabled, color_enabled=False,
+            console=Console(file=output, force_terminal=True, no_color=True),
+            run_log_path=tmp_path / f"{enabled}.log",
+        )
+        reporter.step("准备邮件")
+        for current in range(4):
+            reporter.item(current, 3, "解析论文条目")
+        reporter.close()
+        assert "\x1b[" not in output.getvalue()
+        assert output.getvalue().count("解析论文条目") == (1 if enabled else 0)

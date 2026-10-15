@@ -47,8 +47,11 @@ def main(argv: list[str] | None = None) -> int:
         timed_out = resources.get("deadline_reached", False)
         outcome = "timed_out" if timed_out else "cancelled"
         metrics.cancel_event.set()
-        print("\n" + ("运行已达到总等待预算" if timed_out else "已中断") +
-              "：取消后续请求，保留已完成的解析缓存和请求指标。", file=sys.stderr)
+        message = ("运行已达到总等待预算" if timed_out else "已中断") + "：已保留解析缓存和请求日志。"
+        if "progress" in resources:
+            resources["progress"].error(message)
+        else:
+            print(message, file=sys.stderr)
         return 124 if timed_out else 130
     finally:
         if outcome != "completed":
@@ -60,9 +63,15 @@ def main(argv: list[str] | None = None) -> int:
             target = _write_detailed_metrics_log(metrics, base_dir=Path.cwd(),
                 config=resources["config"].get("telemetry", {}))
             if target:
-                print(f"Partial request metrics: {target}", file=sys.stderr)
+                if "progress" in resources:
+                    resources["progress"].detail(f"Partial request metrics: {target}")
+                else:
+                    print(f"请求指标：{target}", file=sys.stderr)
         if "progress" in resources:
-            resources["progress"].close()
+            reporter = resources["progress"]
+            if outcome != "completed" and reporter.run_log_path is not None:
+                reporter.output(f"日志：{reporter.run_log_path}", style="dim")
+            reporter.close()
 
 
 def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]) -> int:
@@ -81,23 +90,31 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         enabled=bool(config.get("progress", {}).get("enabled", True)) and not args.quiet,
         show_timestamps=bool(config.get("progress", {}).get("show_timestamps", True)),
         color_enabled=bool(ui_config.get("color_enabled", True)) and not args.no_color,
-        run_log_path=os.environ.get("LITERATURE_DIGEST_RUN_LOG"),
+        run_log_path=os.environ.get("LITERATURE_DIGEST_RUN_LOG") or
+            base_dir / "logs" / f"digest-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.log",
     )
 
     resources["progress"] = progress
     output_lock = RLock()
-    def safe_step(message: str) -> None:
+    fallback_count = 0
+    def report_detail(message: str) -> None:
+        nonlocal fallback_count
         with output_lock:
-            if not metrics.cancel_event.is_set():
-                progress.step(message)
+            progress.detail(message)
+            if "回退本地规则" in message:
+                fallback_count += 1
+
+    def report_items(current: int, total: int, message: str) -> None:
+        if not metrics.cancel_event.is_set():
+            progress.item(current, total, message)
     def report_request_event(name: str, fields: dict[str, Any]) -> None:
         if metrics.cancel_event.is_set():
             return
         if name in {"llm_request_started", "llm_retry_wait", "llm_json_repair", "llm_budget_exhausted"}:
-            safe_step("API " + name.removeprefix("llm_") + "：" +
+            report_detail("API " + name.removeprefix("llm_") + "：" +
                 "，".join(f"{key}={value}" for key, value in fields.items()))
         elif name == "llm_request_finished" and fields.get("status") != "ok":
-            safe_step(f"API 请求失败：{fields.get('operation')}，{fields.get('status')}，耗时 {fields.get('elapsed_seconds', 0):.1f}s")
+            report_detail(f"API 请求失败：{fields.get('operation')}，{fields.get('status')}，耗时 {fields.get('elapsed_seconds', 0):.1f}s")
     metrics.event_callback = report_request_event
     run_timeout = float(config.get("performance", {}).get("run_timeout_seconds", 600))
     if run_timeout > 0:
@@ -137,14 +154,15 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         mode=_ui_run_mode(sample_mode=sample_mode, dry_run=dry_run),
         show_banner=bool(ui_config.get("banner_enabled", True)),
     )
-    progress.step("初始化完成")
+    progress.detail("初始化完成")
 
     if sample_mode:
         progress.step("读取内置样例邮件")
         emails = sample_emails()
         unread_estimate = None
     else:
-        progress.step(
+        progress.step("读取 Gmail 未读邮件")
+        progress.detail(
             f"搜索 Gmail 未读邮件，query={config['gmail'].get('query', 'is:unread')!r}，"
             f"max={config['gmail']['max_emails_per_run']}"
         )
@@ -157,9 +175,9 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             return 2
         unread_estimate = gmail.last_result_size_estimate
     if unread_estimate is None:
-        progress.step(f"邮件读取完成：{len(emails)} 封")
+        progress.detail(f"邮件读取完成：{len(emails)} 封")
     else:
-        progress.step(
+        progress.detail(
             f"邮箱中符合当前查询条件的未读邮件约 {unread_estimate} 封；"
             f"本次读取 {len(emails)} 封"
         )
@@ -173,8 +191,10 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
 
     skipped: list[SkippedEmail] = []
     accepted = []
+    progress.item(0, len(emails), "筛选学术邮件")
     for index, email in enumerate(emails, start=1):
-        progress.item(index, len(emails), f"过滤邮件：{_shorten(email.subject, 58)}")
+        progress.detail(f"过滤邮件 {index}/{len(emails)}：{_shorten(email.subject, 58)}")
+        progress.item(index, len(emails), "筛选学术邮件")
         decision = classify_email(email, config)
         if decision.skip:
             skipped.append(
@@ -187,14 +207,14 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             )
         else:
             accepted.append(email)
-    progress.step(f"邮件过滤完成：保留 {len(accepted)} 封，跳过 {len(skipped)} 封")
+    progress.detail(f"邮件过滤完成：保留 {len(accepted)} 封，跳过 {len(skipped)} 封")
 
-    progress.step("解析论文条目")
+    progress.item(0, len(accepted), "解析论文条目")
     entries = parse_emails(
         accepted,
         llm=llm,
-        progress=lambda current, total: safe_step(f"邮件解析进度：{current}/{total}"),
-        event_callback=safe_step,
+        progress=lambda current, total: report_items(current, total, "解析论文条目"),
+        event_callback=report_detail,
         cancel_event=metrics.cancel_event,
         cache_dir=None if sample_mode or not config["parsing"].get("cache_enabled", True) else
             _resolve_path(config["parsing"].get("cache_dir", "data/cache/email_parsing"), base_dir),
@@ -205,15 +225,15 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         llm_max_links=int(config["performance"].get("email_max_links", 50)),
         llm_max_images=int(config["performance"].get("email_max_images", 20)),
     )
-    progress.step(f"解析完成：{len(entries)} 个候选条目")
+    progress.detail(f"解析完成：{len(entries)} 个候选条目")
 
-    progress.step("执行 DOI、URL、标题和模糊标题去重")
+    progress.step("合并重复论文")
     fuzzy_title_threshold = int(config["parsing"].get("fuzzy_title_threshold", 92))
     deduped = deduplicate_entries(
         entries,
         fuzzy_title_threshold=fuzzy_title_threshold,
     )
-    progress.step(
+    progress.detail(
         f"去重完成：保留 {len(deduped.unique_entries)} 个条目，移除 {deduped.duplicates_removed} 个重复项"
     )
 
@@ -242,7 +262,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
                 reference_date=registry_date,
             )
             if history_files:
-                progress.step(
+                progress.detail(
                     f"JSON 去重索引首次回填：读取近 {registry.retention_days} 天 "
                     f"{history_files} 个 Markdown，"
                     f"识别 {history_entries} 条历史记录"
@@ -256,13 +276,14 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
                 f"近 {registry.retention_days} 天 JSON 身份索引移除 "
                 f"{registry_duplicates_removed} 篇重复论文（{reason_text}）。"
             )
-            progress.step(
+            progress.detail(
                 f"跨日期去重完成：移除 {registry_duplicates_removed} 篇（{reason_text}）"
             )
 
     interests_path = _resolve_path(config["research_interests"]["path"], base_dir)
     interest_text = read_research_interests(interests_path)
     if candidate_entries:
+        progress.step("准备研究兴趣画像")
         interest_config = config["research_interests"]
         if sample_mode:
             interest_profile = analyze_research_interests(interest_text, llm)
@@ -279,23 +300,25 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
                 refresh=bool(interest_config.get("refresh_each_run", False)),
             )
         if sample_mode:
-            progress.step("样例模式使用离线研究兴趣画像，不读写生产缓存")
+            progress.detail("样例模式使用离线研究兴趣画像，不读写生产缓存")
         elif cache_hit:
-            progress.step("近期研究兴趣画像命中本地缓存")
+            progress.detail("近期研究兴趣画像命中本地缓存")
         else:
-            progress.step("近期研究兴趣画像已更新")
-        progress.step(f"调用 LLM 分批排序和摘要：{len(candidate_entries)} 篇论文")
+            progress.detail("近期研究兴趣画像已更新")
+        progress.detail(f"调用 LLM 分批排序和摘要：{len(candidate_entries)} 篇论文")
+        batch_size = int(config["performance"].get("ranking_batch_size", 20))
+        progress.item(0, (len(candidate_entries) + batch_size - 1) // batch_size, "论文排序与中文摘要")
         ranked = rank_papers(
             candidate_entries,
             interest_profile,
             llm,
-            batch_size=int(config["performance"].get("ranking_batch_size", 20)),
+            batch_size=batch_size,
             max_workers=int(config["performance"].get("ranking_max_workers", 3)),
-            progress=lambda current, total: safe_step(f"LLM 排序批次：{current}/{total}"),
-            event_callback=safe_step,
+            progress=lambda current, total: report_items(current, total, "论文排序与中文摘要"),
+            event_callback=report_detail,
             cancel_event=metrics.cancel_event,
         )
-        progress.step("LLM 排序和摘要完成")
+        progress.detail("LLM 排序和摘要完成")
     else:
         if deduped.unique_entries and registry_duplicates_removed:
             retention_days = registry.retention_days if registry is not None else 30
@@ -323,6 +346,8 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         irrelevant=count_relevance(ranked, "irrelevant"),
         sample_mode=sample_mode,
     )
+    if fallback_count:
+        warnings.append(f"本次 {fallback_count} 项 LLM 任务失败，部分条目或推荐使用本地规则回退；建议 API 恢复后重新生成。")
     run = DigestRun(
         date_label=date_label,
         stats=stats,
@@ -333,7 +358,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
     )
     if metrics.cancel_event.is_set():
         raise KeyboardInterrupt
-    progress.step("写出 Markdown 和 HTML digest")
+    progress.step("保存文献日报")
     output_paths = write_digests(
         run,
         _resolve_path(config["digest"]["output_dir"], base_dir),
@@ -341,8 +366,8 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         overwrite_existing=bool(config["digest"].get("overwrite_existing", True)),
     )
 
-    if registry is not None and not dry_run:
-        progress.step(f"更新近 {registry.retention_days} 天 JSON 论文身份索引")
+    if registry is not None and not dry_run and not fallback_count:
+        progress.detail(f"更新近 {registry.retention_days} 天 JSON 论文身份索引")
         registry.record_entries(entries, seen_on=registry_date)
         try:
             registry.save(reference_date=registry_date)
@@ -351,7 +376,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             progress.close()
             return 2
 
-    if not dry_run and not sample_mode and config["gmail"].get("mark_as_read", False):
+    if not dry_run and not sample_mode and not fallback_count and config["gmail"].get("mark_as_read", False):
         progress.step(f"标记已处理邮件为已读：{len(accepted)} 封")
         gmail = GmailClient(config, base_dir=base_dir, metrics=metrics)
         try:
@@ -361,30 +386,32 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             progress.close()
             return 2
 
-    progress.done("运行完成")
-    progress.output("Digest written:", style="bold")
-    for output_path in output_paths:
-        progress.output(f"  - {output_path}")
+    progress.done("文献日报已生成")
     progress.output(
-        "Stats: "
-        f"emails={stats.emails_read}, entries={stats.paper_entries_extracted}, "
+        f"邮件 {stats.emails_read} 封 · 新论文 {len(candidate_entries)} 篇 · "
+        f"高相关 {stats.high_relevance} · 中相关 {stats.medium_relevance}"
+    )
+    progress.detail(
+        f"Stats: emails={stats.emails_read}, entries={stats.paper_entries_extracted}, "
         f"duplicates={stats.duplicates_removed}, high={stats.high_relevance}, "
         f"medium={stats.medium_relevance}, low={stats.low_relevance}, "
         f"irrelevant={stats.irrelevant}, skipped={stats.skipped_emails}"
     )
-    telemetry_config = config.get("telemetry", {})
-    if bool(telemetry_config.get("show_compact_summary", True)):
-        for line in metrics.summary_lines(include_request_details=False):
-            progress.output(line)
-    metrics_log_path = _write_detailed_metrics_log(
-        metrics,
-        base_dir=base_dir,
-        config=telemetry_config,
-    )
+    if fallback_count:
+        progress.output(f"提示：{fallback_count} 项 API 任务未完成，输出包含本地规则回退。", style="yellow")
+        if not dry_run and not sample_mode:
+            progress.output("邮件保持未读，未更新去重索引；可在 API 恢复后重跑。", style="yellow")
+    for output_path in output_paths:
+        progress.output(f"  {output_path}")
+    for line in metrics.summary_lines(include_request_details=False):
+        progress.detail(line)
+    metrics_log_path = _write_detailed_metrics_log(metrics, base_dir=base_dir, config=telemetry_config)
     if metrics_log_path is not None:
-        progress.output(f"Detailed request metrics: {metrics_log_path}", style="dim")
+        progress.detail(f"Detailed request metrics: {metrics_log_path}")
     if dry_run:
-        progress.output("Dry-run mode: no email state was modified and no emails were sent.")
+        progress.output("预览模式 · 未修改邮件状态", style="dim")
+    if progress.run_log_path is not None:
+        progress.output(f"日志：{progress.run_log_path}", style="dim")
     progress.close()
     return 0
 

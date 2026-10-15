@@ -211,3 +211,20 @@ raise SystemExit(cli.main([]))
         if process.poll() is None:
             process.kill()
             process.wait()
+
+
+def test_keepalive_before_json_is_logged_without_body(client, monkeypatch, tmp_path):
+    class KeepaliveResponse(Response):
+        status = 200
+        def __init__(self):
+            self.chunks = iter([b"\n\n", Response().read(), b""])
+        def read1(self, size):
+            return next(self.chunks)
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: KeepaliveResponse())
+    journal = tmp_path / 'requests.jsonl'
+    client.metrics.configure_journal(journal)
+    assert client.complete_json('private prompt') == {'ok': True}
+    records = [json.loads(line) for line in journal.read_text().splitlines()]
+    assert any(r['event'] == 'llm_response_headers' and r['http_status'] == 200 for r in records)
+    assert any(r['event'] == 'llm_server_keepalive' for r in records)
+    assert 'private prompt' not in journal.read_text()

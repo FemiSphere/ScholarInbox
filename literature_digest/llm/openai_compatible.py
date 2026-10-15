@@ -156,10 +156,27 @@ class OpenAICompatibleClient:
             if perf_counter() >= expires:
                 raise TimeoutError("network worker capacity deadline exceeded")
 
+        operation = current_llm_operation()
         def fetch() -> None:
             try:
                 with urllib.request.urlopen(request, timeout=timeout) as response:
-                    result = json.loads(response.read().decode("utf-8"))
+                    self._event("llm_response_headers", operation=operation,
+                                http_status=getattr(response, "status", None))
+                    if hasattr(response, "read1"):
+                        chunks = []
+                        saw_keepalive = False
+                        while True:
+                            chunk = response.read1(65536)
+                            if not chunk:
+                                break
+                            chunks.append(chunk)
+                            if not chunk.strip() and not saw_keepalive:
+                                saw_keepalive = True
+                                self._event("llm_server_keepalive", operation=operation)
+                        raw = b"".join(chunks)
+                    else:
+                        raw = response.read()
+                    result = json.loads(raw.decode("utf-8"))
             except Exception as exc:
                 if isinstance(exc, urllib.error.HTTPError):
                     exc.close()

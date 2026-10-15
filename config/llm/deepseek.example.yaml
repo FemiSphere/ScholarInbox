@@ -35,7 +35,7 @@ openai_compatible:
   # 非思考模式下生效。0.1-0.3 更适合稳定 JSON、翻译和摘要。
   temperature: 0.2
 
-  # DeepSeek 思考模式只支持 high/max；本项目默认关闭思考模式，所以留空。
+  # 本项目默认关闭思考模式，留空以免与 thinking.disabled 冲突。
   reasoning_effort: ""
 
   # 开启 JSON Output：请求体会包含 response_format: {"type": "json_object"}。

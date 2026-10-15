@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
+from threading import RLock
 from typing import TextIO
 
 from rich.align import Align
@@ -14,6 +15,7 @@ from rich.progress import (
     Progress,
     SpinnerColumn,
     TextColumn,
+    Task,
     TimeElapsedColumn,
 )
 from rich.text import Text
@@ -32,6 +34,11 @@ _LOGO = (
     "█████ █████ █   █ █████ █████ █   █ █   █ ███ █   █ ████  █████ █   █",
 )
 _LOGO_MIN_CONSOLE_WIDTH = max(len(line) for line in _LOGO) + 6
+
+
+class _CountColumn(MofNCompleteColumn):
+    def render(self, task: Task) -> Text:
+        return Text("") if task.total is None else super().render(task)
 
 
 class ProgressReporter:
@@ -60,9 +67,12 @@ class ProgressReporter:
         self._interactive = enabled and self.console.is_terminal and not bool(self.console.no_color)
         self._progress: Progress | None = None
         self._task_id: int | None = None
+        self._lock = RLock()
+        self._stage = ""
         self._log_handle: TextIO | None = None
-        if run_log_path:
-            path = Path(run_log_path)
+        self.run_log_path = Path(run_log_path) if run_log_path else None
+        if self.run_log_path:
+            path = self.run_log_path
             path.parent.mkdir(parents=True, exist_ok=True)
             self._log_handle = path.open("a", encoding="utf-8")
 
@@ -95,24 +105,37 @@ class ProgressReporter:
         self._write_log(f"{provider} · {mode}")
 
     def step(self, message: str) -> None:
-        self._stop_progress()
-        if self.enabled:
-            self.console.print(self._line(message, marker="•", style="#93c5fd"))
-        self._write_log(message)
+        """Switch stage without adding permanent lines in an interactive terminal."""
+        with self._lock:
+            self._stage = message
+            if self._interactive:
+                self._ensure_progress(None, message)
+                assert self._progress is not None and self._task_id is not None
+                self._progress.remove_task(self._task_id)
+                self._task_id = self._progress.add_task(message, total=None)
+            elif self.enabled:
+                self.console.print(self._line(message, marker="•", style="#93c5fd"))
+            self._write_log(message)
+
+    def detail(self, message: str) -> None:
+        """Persist diagnostics without disturbing the live progress display."""
+        with self._lock:
+            self._write_log(message)
 
     def item(self, current: int, total: int, message: str) -> None:
-        if self._interactive:
-            self._ensure_progress(total)
-            assert self._progress is not None and self._task_id is not None
-            self._progress.update(
-                self._task_id,
-                completed=min(max(0, current), max(0, total)),
-                total=max(1, total),
-                description=message,
-            )
-        elif self.enabled and current == total:
-            self.console.print(self._line(f"{message}：{current}/{total}", marker="•", style="dim"))
-        if current == total:
+        with self._lock:
+            current = min(max(0, current), max(0, total))
+            if self._interactive:
+                self._ensure_progress(total, message)
+                assert self._progress is not None and self._task_id is not None
+                if self._stage != message:
+                    self._progress.reset(self._task_id, total=max(1, total), description=message)
+                self._progress.update(
+                    self._task_id, completed=current, total=max(1, total), description=message,
+                )
+            elif self.enabled and self._stage != message:
+                self.console.print(self._line(message, marker="•", style="#93c5fd"))
+            self._stage = message
             self._write_log(f"{message}: {current}/{total}")
 
     def done(self, message: str) -> None:
@@ -134,12 +157,13 @@ class ProgressReporter:
         self._write_log(message)
 
     def close(self) -> None:
-        self._stop_progress()
-        if self._log_handle is not None:
-            self._log_handle.close()
-            self._log_handle = None
+        with self._lock:
+            self._stop_progress()
+            if self._log_handle is not None:
+                self._log_handle.close()
+                self._log_handle = None
 
-    def _ensure_progress(self, total: int) -> None:
+    def _ensure_progress(self, total: int | None, description: str) -> None:
         if self._progress is not None:
             return
         self._progress = Progress(
@@ -150,15 +174,16 @@ class ProgressReporter:
                 style="#312e81",
                 complete_style="#22d3ee",
                 finished_style="green",
+                pulse_style="#22d3ee",
             ),
-            MofNCompleteColumn(),
+            _CountColumn(),
             TimeElapsedColumn(),
             console=self.console,
             transient=True,
             expand=True,
         )
         self._progress.start()
-        self._task_id = self._progress.add_task("处理中", total=max(1, total))
+        self._task_id = self._progress.add_task(description, total=None if total is None else max(1, total))
 
     def _stop_progress(self) -> None:
         if self._progress is None:
@@ -176,11 +201,12 @@ class ProgressReporter:
         return line
 
     def _write_log(self, message: str) -> None:
-        if self._log_handle is None:
-            return
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self._log_handle.write(f"[{timestamp}] {message}\n")
-        self._log_handle.flush()
+        with self._lock:
+            if self._log_handle is None:
+                return
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self._log_handle.write(f"[{timestamp}] {message}\n")
+            self._log_handle.flush()
 
 
 def _gradient_text(value: str, start: str, end: str) -> Text:
