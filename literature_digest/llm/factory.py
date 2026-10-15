@@ -43,7 +43,13 @@ def build_llm_client(
             reasoning_effort=api_config.get("reasoning_effort", ""),
             response_format_json=bool(api_config.get("response_format_json", True)),
             extra_body=dict(api_config.get("extra_body", {})),
-            max_retries=int(api_config.get("max_retries", 2)),
+            max_retries=int(api_config.get("max_retries", 1)),
+            operation_timeouts={
+                "email_extraction": 45.0,
+                "paper_ranking": 90.0,
+                **{key: float(value) for key, value in api_config.get("operation_timeouts", {}).items()},
+            },
+            request_budget_seconds=float(api_config.get("request_budget_seconds", 120)),
             retry_backoff_seconds=float(api_config.get("retry_backoff_seconds", 1.0)),
             metrics=metrics,
         )

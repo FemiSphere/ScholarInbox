@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import base64
 import json
+import hashlib
+import os
+import tempfile
+import time
+from dataclasses import asdict
+from pathlib import Path
+from threading import Event, Lock
+from collections.abc import Callable
 import re
-from concurrent.futures import ThreadPoolExecutor
 from html import unescape
 from html.parser import HTMLParser
 from typing import Any, Iterable
 from urllib.parse import parse_qs, urlsplit
 
+from .concurrency import cooperative_map
 from .dedupe import DOI_RE, normalize_doi
 from .llm import LLMClient, LLMError
 from .models import EmailMessage, PaperEntry
@@ -120,29 +128,97 @@ def parse_emails(
     llm_text_max_chars: int = 6000,
     llm_max_links: int = 50,
     llm_max_images: int = 20,
+    progress: Callable[[int, int], None] | None = None,
+    event_callback: Callable[[str], None] | None = None,
+    cache_dir: Path | None = None,
+    cache_namespace: str = "",
+    cancel_event: Event | None = None,
 ) -> list[PaperEntry]:
     email_list = list(emails)
+    callback_lock = Lock()
 
-    def parse_one(email: EmailMessage) -> list[PaperEntry]:
+    def emit(message: str) -> None:
+        if event_callback:
+            with callback_lock:
+                event_callback(message)
+
+    def parse_one(item: tuple[int, EmailMessage]) -> list[PaperEntry]:
+        index, email = item
+        started = time.monotonic()
+        cache_path = None
+        if cache_dir is not None:
+            signature = {
+                "version": 1, "email": asdict(email),
+                "llm_enabled": llm_structure_non_scholar and llm is not None,
+                "namespace": cache_namespace, "text_max_chars": llm_text_max_chars,
+                "max_links": llm_max_links, "max_images": llm_max_images,
+            }
+            key = hashlib.sha256(json.dumps(signature, sort_keys=True, default=str).encode()).hexdigest()
+            cache_path = Path(cache_dir) / f"{key}.json"
+            cached = _read_parse_cache(cache_path)
+            if cached is not None:
+                emit(f"邮件解析 {index}/{len(email_list)}：缓存命中，条目 {len(cached)}")
+                return cached
+        emit(f"邮件解析 {index}/{len(email_list)}：开始")
+        failed = False
+
+        def on_error(error: LLMError) -> None:
+            nonlocal failed
+            failed = True
+            emit(f"邮件解析 {index}/{len(email_list)}：LLM 失败（{type(error).__name__}），回退本地规则")
+
+        entries = []
         if llm_structure_non_scholar and llm is not None and not _is_google_scholar_email(email):
-            structured = _parse_non_scholar_email_with_llm(
-                email,
-                llm,
-                text_max_chars=llm_text_max_chars,
-                max_links=llm_max_links,
-                max_images=llm_max_images,
+            entries = _parse_non_scholar_email_with_llm(
+                email, llm, text_max_chars=llm_text_max_chars,
+                max_links=llm_max_links, max_images=llm_max_images, on_error=on_error,
             )
-            if structured:
-                return structured
-        return parse_email(email)
+        if not entries:
+            entries = parse_email(email)
+        if cache_path is not None and not failed:
+            try:
+                _write_parse_cache(cache_path, entries)
+            except OSError:
+                emit(f"邮件解析 {index}/{len(email_list)}：缓存写入失败（OSError）")
+        emit(f"邮件解析 {index}/{len(email_list)}：完成，条目 {len(entries)}，耗时 {time.monotonic() - started:.1f}s")
+        return entries
 
     worker_count = min(max(1, max_workers), len(email_list) or 1)
-    if worker_count == 1:
-        parsed = [parse_one(email) for email in email_list]
-    else:
-        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="email-parser") as executor:
-            parsed = list(executor.map(parse_one, email_list))
+    parsed = cooperative_map(
+        parse_one, enumerate(email_list, start=1), max_workers=worker_count,
+        thread_name_prefix="email-parser", cancel_event=cancel_event, progress=progress,
+    )
     return [entry for email_entries in parsed for entry in email_entries]
+
+
+def _read_parse_cache(path: Path) -> list[PaperEntry] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("version") != 1 or not isinstance(payload.get("entries"), list):
+            return None
+        entries = []
+        for item in payload["entries"]:
+            if not isinstance(item, dict) or not isinstance(item.get("title"), str):
+                return None
+            if not isinstance(item.get("image_paths", []), list):
+                return None
+            entries.append(PaperEntry(**item))
+        return entries
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+
+def _write_parse_cache(path: Path, entries: list[PaperEntry]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as stream:
+            temporary = stream.name
+            json.dump({"version": 1, "entries": [asdict(entry) for entry in entries]}, stream, ensure_ascii=False, default=str)
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def parse_email(email: EmailMessage) -> list[PaperEntry]:
@@ -199,6 +275,7 @@ def _parse_non_scholar_email_with_llm(
     text_max_chars: int,
     max_links: int,
     max_images: int,
+    on_error: Callable[[LLMError], None] | None = None,
 ) -> list[PaperEntry]:
     if not (email.html or email.text or email.snippet):
         return []
@@ -261,7 +338,9 @@ EMAIL_TEXT:
     try:
         with llm_operation("email_extraction", 1):
             payload = llm.complete_json(prompt)
-    except LLMError:
+    except LLMError as exc:
+        if on_error:
+            on_error(exc)
         return []
     return _paper_entries_from_llm_payload(payload, email, images)
 

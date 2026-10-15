@@ -7,6 +7,7 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+from threading import RLock, Timer
 
 from .config import load_config
 from .dedupe import deduplicate_entries
@@ -35,12 +36,46 @@ from .ui import ProgressReporter
 
 
 def main(argv: list[str] | None = None) -> int:
+    metrics = RunMetrics()
+    resources: dict[str, Any] = {}
+    outcome = "failed"
+    try:
+        result = _main(argv, metrics, resources)
+        outcome = "completed" if result == 0 else "failed"
+        return result
+    except KeyboardInterrupt:
+        timed_out = resources.get("deadline_reached", False)
+        outcome = "timed_out" if timed_out else "cancelled"
+        metrics.cancel_event.set()
+        print("\n" + ("运行已达到总等待预算" if timed_out else "已中断") +
+              "：取消后续请求，保留已完成的解析缓存和请求指标。", file=sys.stderr)
+        return 124 if timed_out else 130
+    finally:
+        if outcome != "completed":
+            metrics.cancel_event.set()
+        if "deadline_timer" in resources:
+            resources["deadline_timer"].cancel()
+        metrics.event("run_finished", status=outcome)
+        if outcome != "completed" and "config" in resources:
+            target = _write_detailed_metrics_log(metrics, base_dir=Path.cwd(),
+                config=resources["config"].get("telemetry", {}))
+            if target:
+                print(f"Partial request metrics: {target}", file=sys.stderr)
+        if "progress" in resources:
+            resources["progress"].close()
+
+
+def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
     base_dir = Path.cwd()
     load_dotenv_file(base_dir / ".env")
     config = load_config(args.config)
-    metrics = RunMetrics()
+    resources["config"] = config
+    telemetry_config = config.get("telemetry", {})
+    if telemetry_config.get("detailed_log_enabled", True):
+        journal_dir = _resolve_path(telemetry_config.get("log_dir", "logs/metrics"), base_dir)
+        metrics.configure_journal(journal_dir / f"requests-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.jsonl")
     ui_config = config.get("ui", {})
     progress = ProgressReporter(
         enabled=bool(config.get("progress", {}).get("enabled", True)) and not args.quiet,
@@ -49,6 +84,31 @@ def main(argv: list[str] | None = None) -> int:
         run_log_path=os.environ.get("LITERATURE_DIGEST_RUN_LOG"),
     )
 
+    resources["progress"] = progress
+    output_lock = RLock()
+    def safe_step(message: str) -> None:
+        with output_lock:
+            if not metrics.cancel_event.is_set():
+                progress.step(message)
+    def report_request_event(name: str, fields: dict[str, Any]) -> None:
+        if metrics.cancel_event.is_set():
+            return
+        if name in {"llm_request_started", "llm_retry_wait", "llm_json_repair", "llm_budget_exhausted"}:
+            safe_step("API " + name.removeprefix("llm_") + "：" +
+                "，".join(f"{key}={value}" for key, value in fields.items()))
+        elif name == "llm_request_finished" and fields.get("status") != "ok":
+            safe_step(f"API 请求失败：{fields.get('operation')}，{fields.get('status')}，耗时 {fields.get('elapsed_seconds', 0):.1f}s")
+    metrics.event_callback = report_request_event
+    run_timeout = float(config.get("performance", {}).get("run_timeout_seconds", 600))
+    if run_timeout > 0:
+        def expire_run() -> None:
+            resources["deadline_reached"] = True
+            metrics.event("run_budget_exhausted", seconds=run_timeout)
+            metrics.cancel_event.set()
+        timer = Timer(run_timeout, expire_run)
+        timer.daemon = True
+        resources["deadline_timer"] = timer
+        timer.start()
     dry_run = _resolve_dry_run(args, config)
     if args.max_emails is not None:
         config["gmail"]["max_emails_per_run"] = args.max_emails
@@ -133,6 +193,12 @@ def main(argv: list[str] | None = None) -> int:
     entries = parse_emails(
         accepted,
         llm=llm,
+        progress=lambda current, total: safe_step(f"邮件解析进度：{current}/{total}"),
+        event_callback=safe_step,
+        cancel_event=metrics.cancel_event,
+        cache_dir=None if sample_mode or not config["parsing"].get("cache_enabled", True) else
+            _resolve_path(config["parsing"].get("cache_dir", "data/cache/email_parsing"), base_dir),
+        cache_namespace=_llm_cache_fingerprint(config),
         llm_structure_non_scholar=bool(config["parsing"].get("llm_structure_non_scholar", True)),
         max_workers=int(config["performance"].get("parsing_max_workers", 3)),
         llm_text_max_chars=int(config["performance"].get("email_text_max_chars", 6000)),
@@ -225,7 +291,9 @@ def main(argv: list[str] | None = None) -> int:
             llm,
             batch_size=int(config["performance"].get("ranking_batch_size", 20)),
             max_workers=int(config["performance"].get("ranking_max_workers", 3)),
-            progress=lambda current, total: progress.item(current, total, "LLM 排序批次"),
+            progress=lambda current, total: safe_step(f"LLM 排序批次：{current}/{total}"),
+            event_callback=safe_step,
+            cancel_event=metrics.cancel_event,
         )
         progress.step("LLM 排序和摘要完成")
     else:
@@ -263,6 +331,8 @@ def main(argv: list[str] | None = None) -> int:
         skipped=skipped if config["filtering"].get("audit_skipped_emails", True) else [],
         warnings=warnings,
     )
+    if metrics.cancel_event.is_set():
+        raise KeyboardInterrupt
     progress.step("写出 Markdown 和 HTML digest")
     output_paths = write_digests(
         run,

@@ -26,6 +26,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "reasoning_effort": "low",
         "timeout_seconds": 120,
         "max_output_tokens": 4000,
+        "operation_timeouts": {"email_extraction": 45, "paper_ranking": 90},
+        "request_budget_seconds": 120,
         "codex_cli": {"executable": "codex", "ephemeral": True, "extra_args": []},
         "openai_compatible": {
             "base_url": "",
@@ -34,7 +36,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "temperature": 0.2,
             "reasoning_effort": "",
             "response_format_json": True,
-            "max_retries": 2,
+            "max_retries": 1,
             "retry_backoff_seconds": 1.0,
             "extra_body": {},
         },
@@ -60,6 +62,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         ],
     },
     "parsing": {
+        "cache_enabled": True,
+        "cache_dir": "data/cache/email_parsing",
         "save_toc_images": True,
         "toc_image_dir": "data/toc_images",
         "max_images_per_email": 20,
@@ -104,6 +108,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "show_compact_summary": True,
     },
     "performance": {
+        "run_timeout_seconds": 600,
         "parsing_max_workers": 3,
         "ranking_max_workers": 3,
         "ranking_batch_size": 20,

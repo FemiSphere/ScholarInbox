@@ -70,6 +70,8 @@ filtering:
     - marketing
 
 parsing:
+  cache_enabled: true
+  cache_dir: "data/cache/email_parsing"
   save_toc_images: true
   toc_image_dir: "data/toc_images"
   max_images_per_email: 20
@@ -127,6 +129,8 @@ telemetry:
   show_compact_summary: true
 
 performance:
+  # 整次运行预算；0 关闭。到期取消后续请求，保留缓存和指标。
+  run_timeout_seconds: 600
   # LLM 请求有限并发；遇到限流可降为 2，设为 1 可恢复串行。
   parsing_max_workers: 3
   ranking_max_workers: 3

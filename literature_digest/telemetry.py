@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
-from threading import Lock
+from dataclasses import asdict, dataclass
+from threading import Event, Lock
 from typing import Any, Iterator
+from pathlib import Path
+from datetime import datetime, timezone
+import json
+import sys
 
 
 _LLM_OPERATION: ContextVar[str] = ContextVar("llm_operation", default="unclassified")
@@ -41,6 +45,33 @@ class RunMetrics:
         self._llm_requests: list[LLMRequestMetric] = []
         self._io_requests: list[IORequestMetric] = []
         self._lock = Lock()
+        self.cancel_event = Event()
+        self._journal_path: Path | None = None
+        self._journal_failed = False
+        self.event_callback = None
+
+    def configure_journal(self, path: Path) -> None:
+        self._journal_path = path
+        self.event("run_started")
+
+    def event(self, name: str, **fields: Any) -> None:
+        # Callers provide metadata only, never prompts, responses, headers or keys.
+        if self.event_callback is not None:
+            self.event_callback(name, fields)
+        if self._journal_path is None:
+            return
+        record = {"time": datetime.now(timezone.utc).isoformat(), "event": name, **fields}
+        with self._lock:
+            try:
+                self._journal_path.parent.mkdir(parents=True, exist_ok=True)
+                with self._journal_path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    handle.flush()
+            except OSError:
+                if not self._journal_failed:
+                    print("Warning: cannot write live request metrics", file=sys.stderr)
+                    self._journal_failed = True
+
 
     @property
     def llm_requests(self) -> list[LLMRequestMetric]:
@@ -80,6 +111,7 @@ class RunMetrics:
         )
         with self._lock:
             self._llm_requests.append(metric)
+        self.event("llm_request_metric", **asdict(metric))
 
     def record_io_request(
         self,
@@ -97,6 +129,7 @@ class RunMetrics:
         )
         with self._lock:
             self._io_requests.append(metric)
+        self.event("io_request_finished", **asdict(metric))
 
     def summary_lines(self, *, include_request_details: bool = True) -> list[str]:
         llm_requests = self.llm_requests
@@ -171,3 +204,7 @@ def _as_int(value: Any) -> int | None:
         return int(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def current_llm_operation() -> str:
+    return _LLM_OPERATION.get()

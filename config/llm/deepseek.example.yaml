@@ -10,8 +10,13 @@
 
 provider: "openai_compatible"
 
-# 单次 DeepSeek API 请求超时秒数。DeepSeek 可能排队，建议 180-600。
+# 未分类请求的 socket 超时；实际等待仍受下方总预算限制。
 timeout_seconds: 300
+# 每次尝试的上限；整个逻辑调用（含重试与 JSON 修复）最多 120 秒。
+operation_timeouts:
+  email_extraction: 45
+  paper_ranking: 90
+request_budget_seconds: 120
 
 # 单次模型输出 token 上限。普通文献摘要建议 3000-6000。
 # 如果一次处理很多条目，可优先增加批次数，而不是无限增大本值。
@@ -36,7 +41,7 @@ openai_compatible:
   # 开启 JSON Output：请求体会包含 response_format: {"type": "json_object"}。
   response_format_json: true
   # 429、5xx 和临时网络错误使用指数退避重试。
-  max_retries: 2
+  max_retries: 1
   retry_backoff_seconds: 1.0
 
   # DeepSeek v4 默认开启思考模式。此处关闭思考模式以降低延迟和成本。

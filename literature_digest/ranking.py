@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Event, Lock
 from typing import Any
 
+from .concurrency import cooperative_map
 from .interests import profile_to_json
 from .llm import LLMClient, LLMError
 from .llm.base import redact_secrets
@@ -21,6 +22,8 @@ def rank_papers(
     batch_size: int = 20,
     max_workers: int = 1,
     progress: Callable[[int, int], None] | None = None,
+    event_callback: Callable[[str], None] | None = None,
+    cancel_event: Event | None = None,
 ) -> list[RankedPaper]:
     if batch_size < 1:
         raise ValueError("batch_size must be at least 1")
@@ -29,28 +32,25 @@ def rank_papers(
         for batch_number, offset in enumerate(range(0, len(entries), batch_size), start=1)
     ]
     total_batches = (len(entries) + batch_size - 1) // batch_size
-    ranked_by_batch: dict[int, list[RankedPaper]] = {}
     worker_count = min(max(1, max_workers), total_batches or 1)
-    if worker_count == 1:
-        for completed, (batch_number, offset, batch) in enumerate(batches, start=1):
-            ranked_by_batch[batch_number] = _rank_batch(batch, profile, llm, offset)
-            if progress:
-                progress(completed, total_batches)
-    else:
-        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="paper-ranker") as executor:
-            futures = {
-                executor.submit(_rank_batch, batch, profile, llm, offset): batch_number
-                for batch_number, offset, batch in batches
-            }
-            for completed, future in enumerate(as_completed(futures), start=1):
-                ranked_by_batch[futures[future]] = future.result()
-                if progress:
-                    progress(completed, total_batches)
-    ranked = [
-        paper
-        for batch_number in range(1, total_batches + 1)
-        for paper in ranked_by_batch[batch_number]
-    ]
+    callback_lock = Lock()
+
+    def emit(message: str) -> None:
+        if event_callback:
+            with callback_lock:
+                event_callback(message)
+
+    def rank_one(item: tuple[int, int, list[PaperEntry]]) -> list[RankedPaper]:
+        batch_number, offset, batch = item
+        def on_error(error: LLMError) -> None:
+            emit(f"论文排序 {batch_number}/{total_batches}：LLM 失败（{type(error).__name__}），回退本地规则")
+        return _rank_batch(batch, profile, llm, offset, on_error=on_error)
+
+    ranked_batches = cooperative_map(
+        rank_one, batches, max_workers=worker_count, thread_name_prefix="paper-ranker",
+        cancel_event=cancel_event, progress=progress,
+    )
+    ranked = [paper for batch in ranked_batches for paper in batch]
     return sorted(ranked, key=lambda item: item.score, reverse=True)
 
 
@@ -59,6 +59,7 @@ def _rank_batch(
     profile: InterestProfile,
     llm: LLMClient,
     offset: int,
+    on_error: Callable[[LLMError], None] | None = None,
 ) -> list[RankedPaper]:
     papers_json = [
         {
@@ -130,6 +131,8 @@ PAPERS_JSON:
         with llm_operation("paper_ranking", len(entries)):
             payload = llm.complete_json(prompt)
     except LLMError as exc:
+        if on_error:
+            on_error(exc)
         return _fallback_ranked_batch(entries, profile, exc)
 
     by_index = _payload_by_index(payload)
