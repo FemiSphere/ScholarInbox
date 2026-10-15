@@ -48,8 +48,10 @@ def build_llm_client(
                 "email_extraction": 45.0,
                 "paper_ranking": 90.0,
                 **{key: float(value) for key, value in api_config.get("operation_timeouts", {}).items()},
+                **{key: float(value) for key, value in llm_config.get("operation_timeouts", {}).items()},
             },
-            request_budget_seconds=float(api_config.get("request_budget_seconds", 120)),
+            operation_settings={key: dict(value) for key, value in llm_config.get("operation_settings", {}).items()},
+            request_budget_seconds=float(llm_config.get("request_budget_seconds", api_config.get("request_budget_seconds", 120))),
             retry_backoff_seconds=float(api_config.get("retry_backoff_seconds", 1.0)),
             metrics=metrics,
         )

@@ -22,6 +22,24 @@ request_budget_seconds: 120
 # 如果一次处理很多条目，可优先增加批次数，而不是无限增大本值。
 max_output_tokens: 4000
 
+# 仅相关性分析启用思考；提取与翻译保持非思考。
+operation_settings:
+  paper_ranking:
+    thinking: enabled
+    reasoning_effort: high
+    max_output_tokens: 12000
+    timeout_seconds: 150
+    request_budget_seconds: 180
+  paper_translation:
+    thinking: disabled
+    max_output_tokens: 4000
+    timeout_seconds: 90
+    request_budget_seconds: 120
+  email_extraction:
+    thinking: disabled
+    timeout_seconds: 45
+    request_budget_seconds: 120
+
 openai_compatible:
   # DeepSeek 官方 OpenAI-compatible base_url。
   base_url: "https://api.deepseek.com"

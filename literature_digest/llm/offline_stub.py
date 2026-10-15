@@ -35,6 +35,12 @@ class OfflineStubClient:
                 },
                 ensure_ascii=False,
             )
+        if "TRANSLATE_PAPERS_JSON" in prompt:
+            return json.dumps({"papers": [
+                {"index": item["index"], "title_zh": f"论文：{item.get('title', '')}",
+                 "summary_zh": "这是本地离线 stub 生成的中文摘要，用于测试和 dry-run。"}
+                for item in _extract_papers(prompt)
+            ]}, ensure_ascii=False)
         if "RANK_PAPERS_JSON" in prompt:
             papers = _extract_papers(prompt)
             ranked = []

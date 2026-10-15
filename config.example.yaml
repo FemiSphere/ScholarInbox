@@ -135,8 +135,10 @@ performance:
   parsing_max_workers: 3
   ranking_max_workers: 3
   # 20 是当前保守默认值；大批次可能降低请求数，但增加截断和整批重试风险。
-  ranking_batch_size: 20
+  ranking_batch_size: 10
+  separate_translation: true
+  ranking_abstract_max_chars: 2000
   # 非 Scholar 邮件在本地去重、去页脚后送入 LLM 的上限。
-  email_text_max_chars: 6000
+  email_text_max_chars: 12000
   email_max_links: 50
   email_max_images: 20

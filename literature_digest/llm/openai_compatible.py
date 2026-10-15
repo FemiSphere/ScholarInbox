@@ -37,6 +37,7 @@ class OpenAICompatibleClient:
     metrics: RunMetrics | None = None
     operation_timeouts: dict[str, float] = field(default_factory=lambda: {"email_extraction": 45.0, "paper_ranking": 90.0})
     request_budget_seconds: float = 120.0
+    operation_settings: dict[str, dict[str, Any]] = field(default_factory=dict)
     _network_slots: BoundedSemaphore = field(default_factory=lambda: BoundedSemaphore(8), init=False, repr=False)
 
     def complete(self, prompt: str) -> str:
@@ -54,21 +55,31 @@ class OpenAICompatibleClient:
         if not self.model:
             raise LLMError("Missing openai_compatible.model")
 
+        operation = current_llm_operation()
+        settings = self.operation_settings.get(operation, {})
+        extra_body = dict(self.extra_body or {})
+        if "thinking" in settings:
+            extra_body["thinking"] = {"type": settings["thinking"]}
+        thinking = extra_body.get("thinking", {}).get("type", "unspecified")
+        reasoning_effort = settings.get("reasoning_effort", self.reasoning_effort)
+        if thinking == "disabled":
+            reasoning_effort = ""
+        temperature = settings.get("temperature", self.temperature)
+        max_output_tokens = settings.get("max_output_tokens", self.max_output_tokens)
         endpoint = self.base_url.rstrip("/") + "/chat/completions"
         body: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
         }
-        if self.temperature is not None:
-            body["temperature"] = self.temperature
-        if self.reasoning_effort:
-            body["reasoning_effort"] = self.reasoning_effort
+        if temperature is not None and thinking != "enabled":
+            body["temperature"] = temperature
+        if reasoning_effort:
+            body["reasoning_effort"] = reasoning_effort
         if self.response_format_json:
             body["response_format"] = {"type": "json_object"}
-        if self.max_output_tokens:
-            body["max_tokens"] = self.max_output_tokens
-        if self.extra_body:
-            body.update(self.extra_body)
+        if max_output_tokens:
+            body["max_tokens"] = max_output_tokens
+        body.update(extra_body)
 
         request = urllib.request.Request(
             endpoint,
@@ -81,16 +92,17 @@ class OpenAICompatibleClient:
         )
         deadline = _REQUEST_DEADLINE.get()
         if deadline is None:
-            deadline = perf_counter() + max(0.001, self.request_budget_seconds)
-        operation = current_llm_operation()
+            deadline = perf_counter() + self._operation_budget()
         operation_timeout = self.operation_timeouts.get(operation, self.timeout_seconds)
-        attempt_timeout = max(0.001, min(float(self.timeout_seconds), float(operation_timeout)))
+        attempt_timeout = max(0.001, float(settings.get("timeout_seconds", min(float(self.timeout_seconds), float(operation_timeout)))))
         for attempt in range(max(0, self.max_retries) + 1):
             self._check_budget(deadline)
             started_at = perf_counter()
             timeout = min(attempt_timeout, deadline - started_at)
             self._event("llm_request_started", operation=operation, attempt=attempt + 1,
-                        timeout_seconds=round(timeout, 3), prompt_chars=len(prompt))
+                        timeout_seconds=round(timeout, 3), prompt_chars=len(prompt),
+                        model=self.model, thinking=thinking, reasoning_effort=reasoning_effort,
+                        max_output_tokens=max_output_tokens)
             retryable = False
             failure: Exception | None = None
             status = "ok"
@@ -214,8 +226,12 @@ class OpenAICompatibleClient:
         if self.metrics is not None and hasattr(self.metrics, "event"):
             self.metrics.event(name, **fields)
 
+    def _operation_budget(self) -> float:
+        settings = self.operation_settings.get(current_llm_operation(), {})
+        return max(0.001, float(settings.get("request_budget_seconds", self.request_budget_seconds)))
+
     def complete_json(self, prompt: str) -> dict[str, Any]:
-        deadline = perf_counter() + max(0.001, self.request_budget_seconds)
+        deadline = perf_counter() + self._operation_budget()
         inherited = _REQUEST_DEADLINE.get()
         if inherited is not None:
             deadline = min(deadline, inherited)

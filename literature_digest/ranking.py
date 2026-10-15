@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Callable
 from threading import Event, Lock
@@ -24,9 +25,13 @@ def rank_papers(
     progress: Callable[[int, int], None] | None = None,
     event_callback: Callable[[str], None] | None = None,
     cancel_event: Event | None = None,
+    separate_translation: bool = False,
+    abstract_max_chars: int = 2000,
 ) -> list[RankedPaper]:
     if batch_size < 1:
         raise ValueError("batch_size must be at least 1")
+    if abstract_max_chars < 1:
+        raise ValueError("abstract_max_chars must be at least 1")
     batches = [
         (batch_number, offset, entries[offset : offset + batch_size])
         for batch_number, offset in enumerate(range(0, len(entries), batch_size), start=1)
@@ -43,8 +48,12 @@ def rank_papers(
     def rank_one(item: tuple[int, int, list[PaperEntry]]) -> list[RankedPaper]:
         batch_number, offset, batch = item
         def on_error(error: LLMError) -> None:
-            emit(f"论文排序 {batch_number}/{total_batches}：LLM 失败（{type(error).__name__}），回退本地规则")
-        return _rank_batch(batch, profile, llm, offset, on_error=on_error)
+            stage = "论文翻译" if str(error).startswith("论文翻译失败：") else "论文排序"
+            emit(f"{stage} {batch_number}/{total_batches}：LLM 失败（{type(error).__name__}），回退本地规则")
+        return _rank_batch(
+            batch, profile, llm, offset, on_error=on_error,
+            separate_translation=separate_translation, abstract_max_chars=abstract_max_chars,
+        )
 
     ranked_batches = cooperative_map(
         rank_one, batches, max_workers=worker_count, thread_name_prefix="paper-ranker",
@@ -60,6 +69,9 @@ def _rank_batch(
     llm: LLMClient,
     offset: int,
     on_error: Callable[[LLMError], None] | None = None,
+    *,
+    separate_translation: bool = False,
+    abstract_max_chars: int = 2000,
 ) -> list[RankedPaper]:
     papers_json = [
         {
@@ -69,11 +81,24 @@ def _rank_batch(
             "url": entry.url,
             "authors": entry.authors,
             "venue": entry.venue,
-            "abstract": entry.abstract[:700],
+            "abstract": entry.abstract[:abstract_max_chars],
+            "source_status": "email_excerpt" if entry.abstract.strip() else "title_only",
+            "abstract_truncated": len(entry.abstract) > abstract_max_chars,
+            "abstract_original_chars": len(entry.abstract),
             "source_subject": entry.source_subject,
         }
         for index, entry in enumerate(entries)
     ]
+    translation_schema = (
+        '"title_zh": "中文标题", "summary_zh": "中文摘要式概述",'
+        if not separate_translation else ""
+    )
+    translation_rules = (
+        "- Translate every English paper title into natural Chinese in title_zh; never copy the English title unchanged.\n"
+        "- Produce a faithful Chinese summary from supplied metadata in summary_zh.\n"
+        if not separate_translation else
+        "- Return analysis fields only; do not translate titles or write summaries in this call.\n"
+    )
     prompt = f"""
 RANK_PAPERS_JSON
 
@@ -89,8 +114,7 @@ Schema:
       "index": 0,
       "relevance": "high",
       "score": 0.92,
-      "title_zh": "中文标题",
-      "summary_zh": "中文摘要式概述",
+      {translation_schema}
       "reason_zh": "中文推荐理由",
       "matched_topics": ["pentagonal materials", "COF/MOF"]
     }}
@@ -99,8 +123,7 @@ Schema:
 
 Rules:
 - `index` must match the corresponding entry in `PAPERS_JSON`.
-- Translate every English paper title into natural Chinese in `title_zh`.
-- Never copy the English title unchanged into `title_zh`.
+{translation_rules}
 - Never use placeholders such as "...", "N/A", or empty strings.
 - Keep formulas, chemical names, material abbreviations, model names, and Greek letters as needed.
 - `relevance` must be one of: "high", "medium", "low", "irrelevant".
@@ -115,10 +138,20 @@ Rules:
 - Do not invent details that are not present in the title, venue, snippet, DOI, or URL.
 - For high/medium relevance, write a cautious Chinese note based on available metadata.
 - For low relevance, keep the note short and focus on why it is weakly related.
-- If an alert gives only a short or incomplete snippet, still translate the title and rank from the title,
-  venue/source, DOI, URL, and any visible snippet.
-- Do not default everything to low relevance. If a paper directly mentions materials, methods,
-  or properties in the high-priority profile, use at least medium relevance unless the context is clearly unrelated.
+- Treat abstract as an email excerpt, never as a verified full abstract. source_status, abstract_truncated,
+  and abstract_original_chars describe the available evidence, not the original publication abstract.
+- Assess the actual scientific connection through material system/structural motif, method,
+  property and research question; explain the strongest supported connection to the profile.
+- Shared keywords alone do not require medium/high relevance. Distinguish a real scientific
+  connection or transferable method from incidental vocabulary and unrelated uses of an acronym.
+- High means a direct connection to a priority research question/system/property or a clearly
+  transferable method; medium means a useful adjacent connection; low means a weak connection.
+- Separate topical relevance from evidence confidence. A title-only paper can be high if directly
+  on topic, but explicitly state in reason_zh that evidence is limited to the title/metadata.
+- For truncated or incomplete excerpts mention uncertainty where it affects the conclusion.
+- Never infer a specific method, mechanism, result, or performance value without source evidence.
+- reason_zh must be a short visible Chinese recommendation rationale and evidence limitation,
+  not private chain-of-thought or a step-by-step reasoning transcript.
 - Return one item for every input paper, using the original `index` exactly once.
 
 Research interest profile:
@@ -127,33 +160,106 @@ Research interest profile:
 PAPERS_JSON:
 {json.dumps(papers_json, ensure_ascii=False)}
 """.strip()
+    expected = set(range(offset, offset + len(entries)))
     try:
         with llm_operation("paper_ranking", len(entries)):
             payload = llm.complete_json(prompt)
+        by_index = _payload_by_index(payload, expected)
+        if separate_translation:
+            for item in by_index.values():
+                _validate_analysis(item)
+                # Ignore any unsolicited translation produced by the reasoning call.
+                item.pop("title_zh", None)
+                item.pop("summary_zh", None)
     except LLMError as exc:
         if on_error:
             on_error(exc)
-        return _fallback_ranked_batch(entries, profile, exc)
+        fallback = _fallback_ranked_batch(entries, profile, exc)
+        by_index = {
+            offset + i: {
+                "relevance": paper.relevance, "score": paper.score,
+                "reason_zh": paper.reason_zh, "matched_topics": paper.matched_topics,
+                "title_zh": paper.title_zh, "summary_zh": paper.summary_zh,
+            }
+            for i, paper in enumerate(fallback)
+        }
+        if not separate_translation:
+            return fallback
 
-    by_index = _payload_by_index(payload)
-    result: list[RankedPaper] = []
+    if separate_translation:
+        translation_input = [
+            {**item, "relevance": by_index[item["index"]]["relevance"]}
+            for item in papers_json
+        ]
+        translation_prompt = f"""
+TRANSLATE_PAPERS_JSON
+Translate source paper titles and summarize supplied source metadata into natural Chinese.
+Return only a valid JSON object with this schema:
+{{"papers": [{{"index": 0, "title_zh": "中文标题", "summary_zh": "中文概述"}}]}}
+- Return each input index exactly once. Return no relevance, score, reason or matched_topics fields.
+- Preserve formulas, chemical abbreviations and proper model names; do not leave English titles unchanged.
+- Use only title and the supplied email excerpt. Do not invent methods, mechanisms or results.
+- If source_status is title_only, state that only title/metadata are available; do not fabricate an abstract.
+- An email excerpt is not a verified complete abstract. Preserve uncertainty and truncation boundaries.
+- relevance is supplied only to control summary length: high/medium concise explanation, low/irrelevant brief note.
+PAPERS_JSON:
+{json.dumps(translation_input, ensure_ascii=False)}
+""".strip()
+        try:
+            with llm_operation("paper_translation", len(entries)):
+                translation_payload = llm.complete_json(translation_prompt)
+            translations = _payload_by_index(translation_payload, expected)
+            for i, entry in enumerate(entries):
+                translated = translations[offset + i]
+                if not _valid_generated_text(translated.get("title_zh"), original=entry.title):
+                    raise LLMError("Translation response has missing or unchanged title_zh")
+                if not _valid_generated_text(translated.get("summary_zh")):
+                    raise LLMError("Translation response has missing summary_zh")
+            for index, translated in translations.items():
+                # Never allow a translation response to overwrite scientific ranking.
+                by_index[index].update({key: translated[key] for key in ("title_zh", "summary_zh")})
+        except LLMError as exc:
+            if on_error:
+                on_error(LLMError(f"论文翻译失败：{exc}"))
+
+    result = []
     for local_index, entry in enumerate(entries):
-        absolute_index = offset + local_index
-        item = by_index.get(absolute_index, {})
+        item = by_index[offset + local_index]
+        if separate_translation and not entry.abstract.strip():
+            reason = str(item.get("reason_zh", ""))
+            item["reason_zh"] = reason + "（仅有标题及元数据，证据有限。）"
         result.append(_ranked_from_payload(entry, item))
     return result
 
 
-def _payload_by_index(payload: dict[str, Any]) -> dict[int, dict[str, Any]]:
+def _payload_by_index(
+    payload: dict[str, Any], expected: set[int] | None = None,
+) -> dict[int, dict[str, Any]]:
+    if not isinstance(payload, dict) or not isinstance(payload.get("papers"), list):
+        raise LLMError("Ranking/translation response must contain a papers list")
     result: dict[int, dict[str, Any]] = {}
-    for item in payload.get("papers", []):
-        if not isinstance(item, dict):
-            continue
-        try:
-            result[int(item["index"])] = item
-        except (KeyError, TypeError, ValueError):
-            continue
+    for item in payload["papers"]:
+        if not isinstance(item, dict) or type(item.get("index")) is not int:
+            raise LLMError("Ranking/translation item must have an integer index")
+        index = item["index"]
+        if index in result:
+            raise LLMError("Ranking/translation response contains duplicate indexes")
+        result[index] = item
+    if expected is not None and set(result) != expected:
+        raise LLMError("Ranking/translation response has missing or unexpected indexes")
     return result
+
+
+def _validate_analysis(item: dict[str, Any]) -> None:
+    if item.get("relevance") not in {"high", "medium", "low", "irrelevant"}:
+        raise LLMError("Ranking response has invalid relevance")
+    score = item.get("score")
+    if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score) or not 0 <= score <= 1:
+        raise LLMError("Ranking response has invalid score")
+    if not _valid_generated_text(item.get("reason_zh")):
+        raise LLMError("Ranking response has missing reason_zh")
+    if not isinstance(item.get("matched_topics"), list):
+        raise LLMError("Ranking response has invalid matched_topics")
 
 
 def _ranked_from_payload(entry: PaperEntry, payload: dict[str, Any]) -> RankedPaper:

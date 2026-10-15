@@ -221,7 +221,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         cache_namespace=_llm_cache_fingerprint(config),
         llm_structure_non_scholar=bool(config["parsing"].get("llm_structure_non_scholar", True)),
         max_workers=int(config["performance"].get("parsing_max_workers", 3)),
-        llm_text_max_chars=int(config["performance"].get("email_text_max_chars", 6000)),
+        llm_text_max_chars=int(config["performance"].get("email_text_max_chars", 12000)),
         llm_max_links=int(config["performance"].get("email_max_links", 50)),
         llm_max_images=int(config["performance"].get("email_max_images", 20)),
     )
@@ -306,13 +306,15 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         else:
             progress.detail("近期研究兴趣画像已更新")
         progress.detail(f"调用 LLM 分批排序和摘要：{len(candidate_entries)} 篇论文")
-        batch_size = int(config["performance"].get("ranking_batch_size", 20))
+        batch_size = int(config["performance"].get("ranking_batch_size", 10))
         progress.item(0, (len(candidate_entries) + batch_size - 1) // batch_size, "论文排序与中文摘要")
         ranked = rank_papers(
             candidate_entries,
             interest_profile,
             llm,
             batch_size=batch_size,
+            separate_translation=bool(config["performance"].get("separate_translation", True)),
+            abstract_max_chars=int(config["performance"].get("ranking_abstract_max_chars", 2000)),
             max_workers=int(config["performance"].get("ranking_max_workers", 3)),
             progress=lambda current, total: report_items(current, total, "论文排序与中文摘要"),
             event_callback=report_detail,

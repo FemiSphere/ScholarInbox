@@ -148,7 +148,7 @@ def parse_emails(
         cache_path = None
         if cache_dir is not None:
             signature = {
-                "version": 1, "email": asdict(email),
+                "version": 2, "email": asdict(email),
                 "llm_enabled": llm_structure_non_scholar and llm is not None,
                 "namespace": cache_namespace, "text_max_chars": llm_text_max_chars,
                 "max_links": llm_max_links, "max_images": llm_max_images,
@@ -306,7 +306,7 @@ Schema:
       "doi": "10.xxxx/xxxxx",
       "venue": "Journal name",
       "authors": "Author list if available",
-      "snippet": "Short source snippet if available",
+      "snippet": "Verbatim available article abstract or source excerpt, up to 2000 characters; empty if unavailable",
       "image_index": 0
     }}
   ]
@@ -314,6 +314,9 @@ Schema:
 
 Rules:
 - `title` must be a specific academic paper/article title.
+- Preserve the available article abstract/excerpt faithfully in `snippet` (up to 2000 characters).
+- Do not shorten a supplied abstract into a generic description. Preserve material, methods, results and limitations actually present.
+- Never combine text from adjacent articles or invent a full abstract when only a title is visible.
 - `url` should point to the paper landing page or DOI page when available.
 - `doi` should be empty if not present.
 - `venue` should be journal/source name if visible.
