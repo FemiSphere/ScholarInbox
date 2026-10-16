@@ -127,3 +127,33 @@ def test_plain_and_quiet_output_do_not_emit_animation_codes(tmp_path):
         reporter.close()
         assert "\x1b[" not in output.getvalue()
         assert output.getvalue().count("解析论文条目") == (1 if enabled else 0)
+
+
+def test_file_output_emits_osc8_with_encoded_uri_and_plain_log(tmp_path):
+    target = tmp_path / "中文 folder" / "日报 阅读版.html"
+    log = tmp_path / "run.log"
+    for no_color in (False, True):
+        output = StringIO()
+        console = Console(file=output, force_terminal=True, color_system="truecolor",
+            no_color=no_color, width=20, _environ={"TERM": "xterm-256color"})
+        reporter = ProgressReporter(console=console, run_log_path=log)
+        reporter.output_file(target)
+        reporter.close()
+        raw = output.getvalue()
+        assert "\x1b]8;" in raw
+        assert target.resolve().as_uri() in raw
+        assert "HTML 阅读版" in Text.from_ansi(raw).plain
+        # Terminal auto-wraps long labels; Rich must not insert broken path lines.
+        assert raw.count("\n") == 1
+    assert str(target.resolve()) in log.read_text()
+    assert "\x1b" not in log.read_text()
+
+
+def test_redirected_file_output_is_complete_plain_path(tmp_path):
+    target = tmp_path / "nested" / "a-long-file-name.html"
+    output = StringIO()
+    reporter = ProgressReporter(console=Console(file=output, force_terminal=False, width=20))
+    reporter.output_file(target)
+    reporter.close()
+    assert output.getvalue() == f"  {target.resolve()}\n"
+    assert "\x1b" not in output.getvalue()

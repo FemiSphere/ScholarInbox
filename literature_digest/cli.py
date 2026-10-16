@@ -404,7 +404,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         if not dry_run and not sample_mode:
             progress.output("邮件保持未读，未更新去重索引；可在 API 恢复后重跑。", style="yellow")
     for output_path in output_paths:
-        progress.output(f"  {output_path}")
+        progress.output_file(output_path)
     for line in metrics.summary_lines(include_request_details=False):
         progress.detail(line)
     metrics_log_path = _write_detailed_metrics_log(metrics, base_dir=base_dir, config=telemetry_config)

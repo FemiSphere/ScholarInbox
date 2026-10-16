@@ -151,6 +151,19 @@ class ProgressReporter:
         self.console.print(message, style=style, markup=False)
         self._write_log(message)
 
+    def output_file(self, path: str | Path) -> None:
+        """Emit an explicit OSC 8 file link in terminals and a plain path in logs."""
+        target = Path(path).resolve()
+        self._stop_progress()
+        if self.console.is_terminal:
+            label = "HTML 阅读版" if target.suffix.lower() == ".html" else "Markdown 文件"
+            text = Text("  ")
+            text.append(f"{label} ↗ {target.name}", style=f"link {target.as_uri()}")
+            self.console.print(text, soft_wrap=True)
+        else:
+            self.console.print(f"  {target}", markup=False, soft_wrap=True)
+        self._write_log(f"  {target}")
+
     def error(self, message: str) -> None:
         self._stop_progress()
         self.console.print(message, style="bold red", markup=False)
