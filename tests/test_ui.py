@@ -157,3 +157,53 @@ def test_redirected_file_output_is_complete_plain_path(tmp_path):
     reporter.close()
     assert output.getvalue() == f"  {target.resolve()}\n"
     assert "\x1b" not in output.getvalue()
+
+
+def test_shimmer_changes_colors_without_moving_logo():
+    from literature_digest.ui import _shimmer_text, _LOGO
+    logo = "\n".join(_LOGO)
+    first, later = _shimmer_text(logo, 0.1), _shimmer_text(logo, 0.6)
+    assert first.plain == later.plain == logo
+    assert [span.style for span in first.spans] != [span.style for span in later.spans]
+
+
+def test_animated_banner_and_progress_share_one_live_surface():
+    output = StringIO()
+    reporter = ProgressReporter(console=Console(file=output, force_terminal=True,
+        color_system="truecolor", width=100, _environ={"TERM": "xterm-256color"}))
+    reporter.banner(provider="DeepSeek API", mode="正式运行")
+    live = reporter._live
+    assert live is not None and live.is_started
+    reporter.item(0, 10, "论文相关性分析")
+    assert reporter._live is live
+    assert not reporter._progress.live.is_started
+    reporter.item(5, 10, "论文相关性分析")
+    reporter.done("完成")
+    assert not live.is_started
+    assert reporter._live is None
+    assert reporter._progress is None
+    reporter.close()
+    assert "完成" in Text.from_ansi(output.getvalue()).plain
+
+
+def test_noninteractive_banner_is_static_and_compact():
+    output = StringIO()
+    reporter = ProgressReporter(console=Console(file=output, force_terminal=False, width=100))
+    reporter.banner(provider="DeepSeek API", mode="正式运行")
+    assert reporter._live is None
+    reporter.close()
+    assert "ScholarInbox" in output.getvalue()
+    assert "█████" not in output.getvalue()
+    assert "\x1b" not in output.getvalue()
+
+
+def test_disabled_banner_keeps_existing_progress_and_osc8_behavior():
+    output = StringIO()
+    reporter = ProgressReporter(console=Console(file=output, force_terminal=True,
+        color_system="truecolor", _environ={"TERM": "xterm-256color"}))
+    reporter.banner(provider="DeepSeek API", mode="正式运行", show_banner=False)
+    reporter.item(0, 2, "处理")
+    assert reporter._live is None
+    reporter.output_file('/tmp/digest.html')
+    reporter.close()
+    assert "\x1b]8;" in output.getvalue()

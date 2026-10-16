@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from math import exp
 from pathlib import Path
 from time import perf_counter
 from threading import RLock
@@ -9,6 +10,7 @@ from typing import TextIO
 from rich.align import Align
 from rich.console import Console, Group
 from rich.panel import Panel
+from rich.live import Live
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -65,6 +67,8 @@ class ProgressReporter:
             )
         )
         self._interactive = enabled and self.console.is_terminal and not bool(self.console.no_color)
+        self._live: Live | None = None
+        self._banner_view: _ShimmerBanner | None = None
         self._progress: Progress | None = None
         self._task_id: int | None = None
         self._lock = RLock()
@@ -79,26 +83,14 @@ class ProgressReporter:
     def banner(self, *, provider: str, mode: str, show_banner: bool = True) -> None:
         metadata = f"{APP_AUTHOR} · v{__version__}"
         if self.enabled and show_banner:
-            if self._interactive and self.console.width >= _LOGO_MIN_CONSOLE_WIDTH:
-                logo = Align.center(_gradient_text("\n".join(_LOGO), "#8b5cf6", "#22d3ee"))
+            self._banner_view = _ShimmerBanner(self.console, provider, mode, animated=self._interactive)
+            if self._interactive:
+                self._live = Live(get_renderable=self._live_renderable, console=self.console,
+                    refresh_per_second=8, transient=False, vertical_overflow="crop")
+                self._live.start(refresh=True)
             else:
-                logo = Align.center(Text(APP_NAME, style="bold bright_cyan"))
-            content = Group(
-                logo,
-                Text(""),
-                Align.center(Text(APP_QUOTE, style="bold #dbeafe")),
-                Align.right(Text(metadata, style="dim")),
-            )
-            self.console.print(
-                Panel(
-                    content,
-                    border_style="#6366f1",
-                    padding=(1, 2),
-                    expand=True,
-                )
-            )
-            self.console.print(Align.center(Text(f"{provider} · {mode}", style="dim")))
-            self.console.print()
+                self.console.print(self._banner_view)
+                self.console.print()
         self._write_log(APP_NAME)
         self._write_log(APP_QUOTE)
         self._write_log(metadata)
@@ -195,15 +187,29 @@ class ProgressReporter:
             transient=True,
             expand=True,
         )
-        self._progress.start()
+        if self._live is None:
+            self._progress.start()
         self._task_id = self._progress.add_task(description, total=None if total is None else max(1, total))
 
+    def _live_renderable(self):
+        parts = [self._banner_view] if self._banner_view is not None else []
+        progress = self._progress
+        if progress is not None:
+            parts.append(progress.get_renderable())
+        return Group(*parts)
+
     def _stop_progress(self) -> None:
-        if self._progress is None:
-            return
-        self._progress.stop()
-        self._progress = None
-        self._task_id = None
+        if self._live is not None:
+            # Freeze the header and remove the transient task before printing results.
+            self._progress = None
+            self._task_id = None
+            self._banner_view.freeze()
+            self._live.stop()
+            self._live = None
+        elif self._progress is not None:
+            self._progress.stop()
+            self._progress = None
+            self._task_id = None
 
     def _line(self, message: str, *, marker: str, style: str) -> Text:
         line = Text()
@@ -222,25 +228,72 @@ class ProgressReporter:
             self._log_handle.flush()
 
 
-def _gradient_text(value: str, start: str, end: str) -> Text:
-    start_rgb = _hex_rgb(start)
-    end_rgb = _hex_rgb(end)
-    visible = max(1, sum(1 for char in value if not char.isspace()))
-    index = 0
-    result = Text()
-    for char in value:
-        if char.isspace():
-            result.append(char)
-            continue
-        ratio = index / max(1, visible - 1)
-        red = round(start_rgb[0] + (end_rgb[0] - start_rgb[0]) * ratio)
-        green = round(start_rgb[1] + (end_rgb[1] - start_rgb[1]) * ratio)
-        blue = round(start_rgb[2] + (end_rgb[2] - start_rgb[2]) * ratio)
-        result.append(char, style=f"bold rgb({red},{green},{blue})")
-        index += 1
-    return result
-
-
 def _hex_rgb(value: str) -> tuple[int, int, int]:
     cleaned = value.lstrip("#")
     return tuple(int(cleaned[index : index + 2], 16) for index in (0, 2, 4))  # type: ignore[return-value]
+
+
+class _ShimmerBanner:
+    """A time-based renderable refreshed by the same Live surface as progress."""
+
+    def __init__(self, console: Console, provider: str, mode: str, *, animated: bool):
+        self.console = console
+        self.provider = provider
+        self.mode = mode
+        self.animated = animated
+        self.started_at = perf_counter()
+        self.frozen_phase = 0.35
+
+    def freeze(self) -> None:
+        if self.animated:
+            self.frozen_phase = ((perf_counter() - self.started_at) / 4.5) % 1
+        self.animated = False
+
+    def __rich__(self):
+        phase = ((perf_counter() - self.started_at) / 4.5) % 1 if self.animated else self.frozen_phase
+        wide = self.console.is_terminal and self.console.width >= _LOGO_MIN_CONSOLE_WIDTH and not self.console.no_color
+        logo = "\n".join(_LOGO) if wide else APP_NAME
+        border = _palette_color(phase)
+        return Group(
+            Panel(Group(
+                Align.center(_shimmer_text(logo, phase)),
+                Text(""),
+                Align.center(Text(APP_QUOTE, style="bold #dbeafe")),
+                Align.right(Text(f"{APP_AUTHOR} · v{__version__}", style="dim")),
+            ), border_style=border, padding=(1, 2), expand=True),
+            Align.center(Text(f"{self.provider} · {self.mode}", style="dim")),
+            Text(""),
+        )
+
+
+def _palette_color(position: float) -> str:
+    palette = ((139, 92, 246), (94, 165, 250), (34, 211, 238), (167, 139, 250))
+    value = (position % 1) * len(palette)
+    index = int(value)
+    mix = value - index
+    left, right = palette[index], palette[(index + 1) % len(palette)]
+    rgb = [round(a + (b - a) * mix) for a, b in zip(left, right)]
+    return "#" + "".join(f"{channel:02x}" for channel in rgb)
+
+
+def _shimmer_text(value: str, phase: float) -> Text:
+    """Horizontal color flow with a soft highlight; content and geometry stay fixed."""
+    width = max(1, max(map(len, value.splitlines()), default=1) - 1)
+    result = Text()
+    x = 0
+    for char in value:
+        if char == "\n":
+            result.append(char)
+            x = 0
+            continue
+        if char.isspace():
+            result.append(char)
+        else:
+            position = x / width
+            color = _hex_rgb(_palette_color(position * 0.65 - phase))
+            # Highlight enters/leaves beyond the edges instead of jumping across the logo.
+            shine = 0.65 * exp(-((position - (phase * 1.5 - 0.25)) / 0.13) ** 2)
+            rgb = [round(channel + (245 - channel) * shine) for channel in color]
+            result.append(char, style="bold rgb(" + ",".join(map(str, rgb)) + ")")
+        x += 1
+    return result
