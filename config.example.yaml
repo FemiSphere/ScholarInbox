@@ -134,11 +134,15 @@ performance:
   # LLM 请求有限并发；遇到限流可降为 2，设为 1 可恢复串行。
   parsing_max_workers: 3
   ranking_max_workers: 3
-  # 20 是当前保守默认值；大批次可能降低请求数，但增加截断和整批重试风险。
+  # 每批相关性分析论文数。
   ranking_batch_size: 10
   separate_translation: true
   ranking_abstract_max_chars: 2000
-  # 非 Scholar 邮件在本地去重、去页脚后送入 LLM 的上限。
+  # 非 Scholar 邮件每个分块的上限；整封邮件不会仅截取前 N 字符。
   email_text_max_chars: 12000
+  email_max_chunk_items: 8
+  email_max_split_depth: 4
+  email_max_requests_per_email: 32
+  email_budget_seconds: 240
   email_max_links: 50
   email_max_images: 20

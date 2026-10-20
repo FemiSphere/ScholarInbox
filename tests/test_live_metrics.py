@@ -43,3 +43,17 @@ def test_cli_exception_preserves_partial_metrics(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError):
         cli.main([])
     assert list((tmp_path / 'logs/metrics').glob('metrics-*.log'))
+
+
+def test_json_validation_failures_are_visible_separately_from_transport_errors(tmp_path):
+    path = tmp_path / 'requests.jsonl'
+    metrics = RunMetrics()
+    metrics.configure_journal(path)
+    with llm_operation('email_extraction', 1):
+        metrics.record_llm_request(elapsed_seconds=1, prompt_chars=12, status='output_length')
+        metrics.record_llm_validation_failure(code='invalid_json')
+    summary = "\n".join(metrics.summary_lines())
+    assert 'errors=1' in summary
+    assert 'validation_failures=1' in summary
+    assert 'operation=email_extraction, code=invalid_json' in summary
+    assert 'llm_validation_failed' in path.read_text()

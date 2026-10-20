@@ -37,6 +37,7 @@ operation_settings:
     request_budget_seconds: 120
   email_extraction:
     thinking: disabled
+    max_output_tokens: 8000
     timeout_seconds: 45
     request_budget_seconds: 120
 

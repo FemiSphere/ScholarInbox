@@ -8,6 +8,8 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from threading import RLock, Timer
+from collections import Counter
+import re
 
 from .config import load_config
 from .dedupe import deduplicate_entries
@@ -97,12 +99,15 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
     resources["progress"] = progress
     output_lock = RLock()
     fallback_count = 0
+    fallback_reasons: Counter[str] = Counter()
     def report_detail(message: str) -> None:
         nonlocal fallback_count
         with output_lock:
             progress.detail(message)
             if "回退本地规则" in message:
                 fallback_count += 1
+                match = re.search(r"code=([a-z0-9_]+)", message)
+                fallback_reasons[match.group(1) if match else "llm_error"] += 1
 
     def report_items(current: int, total: int, message: str) -> None:
         if not metrics.cancel_event.is_set():
@@ -224,6 +229,10 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         llm_text_max_chars=int(config["performance"].get("email_text_max_chars", 12000)),
         llm_max_links=int(config["performance"].get("email_max_links", 50)),
         llm_max_images=int(config["performance"].get("email_max_images", 20)),
+        llm_max_chunk_items=int(config["performance"].get("email_max_chunk_items", 8)),
+        llm_max_split_depth=int(config["performance"].get("email_max_split_depth", 4)),
+        llm_max_requests_per_email=int(config["performance"].get("email_max_requests_per_email", 32)),
+        llm_email_budget_seconds=float(config["performance"].get("email_budget_seconds", 240)),
     )
     progress.detail(f"解析完成：{len(entries)} 个候选条目")
 
@@ -349,7 +358,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         sample_mode=sample_mode,
     )
     if fallback_count:
-        warnings.append(f"本次 {fallback_count} 项 LLM 任务失败，部分条目或推荐使用本地规则回退；建议 API 恢复后重新生成。")
+        warnings.append(f"本次 {fallback_count} 项 LLM 任务失败，部分条目或推荐使用本地规则回退；请根据日志中的具体原因修复后重跑；邮件提取回退可能遗漏条目。")
     run = DigestRun(
         date_label=date_label,
         stats=stats,
@@ -400,9 +409,13 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         f"irrelevant={stats.irrelevant}, skipped={stats.skipped_emails}"
     )
     if fallback_count:
-        progress.output(f"提示：{fallback_count} 项 API 任务未完成，输出包含本地规则回退。", style="yellow")
+        progress.output(f"提示：{fallback_count} 项任务未完整处理，输出包含本地规则回退。", style="yellow")
+        labels = {"output_length": "输出超长", "invalid_json": "JSON 格式异常", "invalid_schema": "输出结构不完整", "invalid_response": "响应结构异常",
+                  "timeout": "请求超时", "network_error": "网络异常", "budget_exhausted": "处理预算耗尽",
+                  "request_limit": "拆分请求达到上限", "llm_error": "提取或生成异常"}
+        progress.output("原因：" + "；".join(f"{labels.get(code, code)} {count} 项" for code, count in fallback_reasons.items()), style="yellow")
         if not dry_run and not sample_mode:
-            progress.output("邮件保持未读，未更新去重索引；可在 API 恢复后重跑。", style="yellow")
+            progress.output("邮件保持未读，未更新去重索引；可在问题修复后重跑。", style="yellow")
     for output_path in output_paths:
         progress.output_file(output_path)
     for line in metrics.summary_lines(include_request_details=False):

@@ -6,19 +6,21 @@ import hashlib
 import os
 import tempfile
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from threading import Event, Lock
 from collections.abc import Callable
 import re
-from html import unescape
+from html import unescape, escape
 from html.parser import HTMLParser
 from typing import Any, Iterable
 from urllib.parse import parse_qs, urlsplit
 
 from .concurrency import cooperative_map
+from .email_chunks import EmailChunk, build_email_chunks, split_email_chunk
 from .dedupe import DOI_RE, normalize_doi
 from .llm import LLMClient, LLMError
+from .llm.base import LLMOutputTruncatedError
 from .models import EmailMessage, PaperEntry
 from .telemetry import llm_operation
 
@@ -128,6 +130,10 @@ def parse_emails(
     llm_text_max_chars: int = 6000,
     llm_max_links: int = 50,
     llm_max_images: int = 20,
+    llm_max_chunk_items: int = 8,
+    llm_max_split_depth: int = 4,
+    llm_max_requests_per_email: int = 32,
+    llm_email_budget_seconds: float = 240,
     progress: Callable[[int, int], None] | None = None,
     event_callback: Callable[[str], None] | None = None,
     cache_dir: Path | None = None,
@@ -148,10 +154,13 @@ def parse_emails(
         cache_path = None
         if cache_dir is not None:
             signature = {
-                "version": 2, "email": asdict(email),
+                "version": 3, "email": asdict(email),
                 "llm_enabled": llm_structure_non_scholar and llm is not None,
                 "namespace": cache_namespace, "text_max_chars": llm_text_max_chars,
                 "max_links": llm_max_links, "max_images": llm_max_images,
+                "max_chunk_items": llm_max_chunk_items, "max_split_depth": llm_max_split_depth,
+                "max_requests_per_email": llm_max_requests_per_email,
+                "email_budget_seconds": llm_email_budget_seconds,
             }
             key = hashlib.sha256(json.dumps(signature, sort_keys=True, default=str).encode()).hexdigest()
             cache_path = Path(cache_dir) / f"{key}.json"
@@ -165,15 +174,19 @@ def parse_emails(
         def on_error(error: LLMError) -> None:
             nonlocal failed
             failed = True
-            emit(f"邮件解析 {index}/{len(email_list)}：LLM 失败（{type(error).__name__}），回退本地规则")
+            emit(f"邮件解析 {index}/{len(email_list)}：LLM 失败（{type(error).__name__}，code={_safe_error_code(error)}），回退本地规则")
 
         entries = []
         if llm_structure_non_scholar and llm is not None and not _is_google_scholar_email(email):
             entries = _parse_non_scholar_email_with_llm(
                 email, llm, text_max_chars=llm_text_max_chars,
                 max_links=llm_max_links, max_images=llm_max_images, on_error=on_error,
+                max_chunk_items=llm_max_chunk_items, max_split_depth=llm_max_split_depth,
+                max_requests_per_email=llm_max_requests_per_email,
+                email_budget_seconds=llm_email_budget_seconds, cancel_event=cancel_event,
+                event_callback=lambda message: emit(f"邮件解析 {index}/{len(email_list)}：{message}"),
             )
-        if not entries:
+        else:
             entries = parse_email(email)
         if cache_path is not None and not failed:
             try:
@@ -268,28 +281,110 @@ def _parse_html_email(email: EmailMessage) -> list[PaperEntry]:
     return entries
 
 
-def _parse_non_scholar_email_with_llm(
-    email: EmailMessage,
-    llm: LLMClient,
-    *,
-    text_max_chars: int,
-    max_links: int,
-    max_images: int,
-    on_error: Callable[[LLMError], None] | None = None,
-) -> list[PaperEntry]:
-    if not (email.html or email.text or email.snippet):
-        return []
-    extractor = _AnchorExtractor()
-    extractor.feed(email.html or "")
-    text = _compact_email_text(email, max_chars=max(500, text_max_chars))
-    links = _candidate_links_for_llm(extractor.links)[: max(0, max_links)]
-    images = _candidate_images_for_llm(list(email.image_paths) + list(extractor.images))[: max(0, max_images)]
-    if not links and not text:
-        return []
-    if not links and len(text) < 500:
-        return []
+def _safe_error_code(error: LLMError) -> str:
+    code = getattr(error, "code", "llm_error")
+    allowed = {"llm_error", "output_length", "output_truncated", "invalid_schema", "invalid_json",
+               "malformed_json", "json_parse_error", "budget_exhausted", "timeout", "network",
+               "network_error", "invalid_response", "request_limit", "cancelled", "content_filter",
+               "insufficient_system_resource", "aborted", "invalid_finish_reason",
+               "http_400", "http_401", "http_402", "http_403", "http_404", "http_408",
+               "http_429", "http_500", "http_502", "http_503", "http_504"}
+    return code if code in allowed else "llm_error"
 
-    prompt = f"""
+
+def _parse_non_scholar_email_with_llm(
+    email: EmailMessage, llm: LLMClient, *, text_max_chars: int, max_links: int,
+    max_images: int, on_error: Callable[[LLMError], None] | None = None,
+    max_chunk_items: int = 8, max_split_depth: int = 4,
+    max_requests_per_email: int = 32, email_budget_seconds: float = 240,
+    cancel_event: Event | None = None, event_callback: Callable[[str], None] | None = None,
+) -> list[PaperEntry]:
+    from .llm.base import llm_time_budget
+
+    chunks = build_email_chunks(
+        html=email.html, text=email.text or email.snippet,
+        image_paths=[str(path) for path in email.image_paths],
+        is_article=lambda title, href: _is_likely_title(title, href),
+        accept_link=lambda href, title: not _is_obvious_non_paper_link(title, href),
+        accept_image=_is_useful_image_src, text_max_chars=text_max_chars,
+        max_links=max_links, max_images=max_images, max_items=max_chunk_items,
+    )
+    deadline = time.monotonic() + max(0, email_budget_seconds)
+    request_count = 0
+
+    def emit(message: str) -> None:
+        if event_callback:
+            event_callback(message)
+
+    def fallback(chunk: EmailChunk, error: LLMError) -> list[PaperEntry]:
+        if on_error:
+            on_error(error)
+        # Only the failed region is passed to deterministic extraction.
+        html = "".join(f'<a href="{escape(url, quote=True)}">{escape(title)}</a>' for url, title in chunk.links)
+        html += "".join(f'<img src="{escape(image, quote=True)}">' for image in chunk.images)
+        html += f"<p>{escape(chunk.text)}</p>"
+        local = replace(email, html=html if email.html else "",
+                        text="" if email.html else chunk.text, snippet="", image_paths=[])
+        return parse_email(local)
+
+    def extract(chunk: EmailChunk, depth: int) -> list[PaperEntry]:
+        nonlocal request_count
+        if cancel_event is not None and cancel_event.is_set():
+            raise KeyboardInterrupt
+        if request_count >= max_requests_per_email:
+            return fallback(chunk, LLMError("Email extraction request limit reached", code="request_limit"))
+        if time.monotonic() >= deadline:
+            return fallback(chunk, LLMError("Email extraction budget exhausted", code="budget_exhausted"))
+        request_count += 1
+        emit(f"分块请求 {request_count}，深度 {depth}，正文 {len(chunk.text)} 字符，链接 {len(chunk.links)}，图片 {len(chunk.images)}")
+        try:
+            with llm_operation("email_extraction", 1):
+                payload = llm.complete_json(_email_chunk_prompt(email, chunk))
+            if not isinstance(payload, dict) or not isinstance(payload.get("papers"), list):
+                raise LLMError("Invalid extraction envelope", code="invalid_schema")
+            if any(not isinstance(item, dict) or not isinstance(item.get("title"), str)
+                   or not item["title"].strip()
+                   or any(item.get(field) is not None and not isinstance(item[field], str)
+                          for field in ("url", "doi", "venue", "authors", "snippet"))
+                   for item in payload["papers"]):
+                raise LLMError("Invalid extraction paper", code="invalid_schema")
+            images = [{"index": index, "url": src} for index, src in enumerate(chunk.images)]
+            return _paper_entries_from_llm_payload(payload, email, images)
+        except LLMError as error:
+            code = _safe_error_code(error)
+            recoverable = isinstance(error, LLMOutputTruncatedError) or code in {"output_length", "output_truncated", "invalid_schema", "invalid_json", "malformed_json", "json_parse_error"}
+            # Legacy clients do not expose typed JSON errors yet.
+            recoverable = recoverable or (code == "llm_error" and "JSON" in str(error))
+            children = split_email_chunk(chunk) if recoverable and depth < max_split_depth else []
+            if children:
+                emit(f"分块拆分（{code}），深度 {depth + 1}，子块 {len(children)}")
+                return [entry for child in children for entry in extract(child, depth + 1)]
+            return fallback(chunk, error)
+
+    results = []
+    with llm_time_budget(max(0, email_budget_seconds)):
+        for chunk in chunks:
+            results.extend(extract(chunk, 0))
+    # Overlap can return the same paper twice. Keep its richest source excerpt.
+    by_identity: dict[tuple[str, str], PaperEntry] = {}
+    for entry in results:
+        key = (entry.title.casefold(), entry.url.casefold())
+        previous = by_identity.get(key)
+        if previous is None:
+            by_identity[key] = entry
+        else:
+            previous.image_paths = list(dict.fromkeys(previous.image_paths + entry.image_paths))
+            if len(entry.abstract) > len(previous.abstract):
+                previous.abstract = entry.abstract
+                previous.raw_text = entry.raw_text
+    return list(by_identity.values())
+
+
+def _email_chunk_prompt(email: EmailMessage, chunk: EmailChunk) -> str:
+    text = chunk.text
+    links = _candidate_links_for_llm(chunk.links)
+    images = [{"index": index, "url": src} for index, src in enumerate(chunk.images)]
+    return f"""
 EMAIL_PAPER_EXTRACTION_JSON
 
 Extract academic paper entries from a publisher, journal, newsletter, or RSS-style academic email.
@@ -338,14 +433,6 @@ CANDIDATE_IMAGES_JSON:
 EMAIL_TEXT:
 {text}
 """.strip()
-    try:
-        with llm_operation("email_extraction", 1):
-            payload = llm.complete_json(prompt)
-    except LLMError as exc:
-        if on_error:
-            on_error(exc)
-        return []
-    return _paper_entries_from_llm_payload(payload, email, images)
 
 
 def _parse_text_email(email: EmailMessage) -> list[PaperEntry]:

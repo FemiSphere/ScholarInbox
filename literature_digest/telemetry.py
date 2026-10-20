@@ -49,6 +49,7 @@ class RunMetrics:
         self._journal_path: Path | None = None
         self._journal_failed = False
         self.event_callback = None
+        self._validation_failures: list[dict[str, str]] = []
 
     def configure_journal(self, path: Path) -> None:
         self._journal_path = path
@@ -82,6 +83,12 @@ class RunMetrics:
     def io_requests(self) -> list[IORequestMetric]:
         with self._lock:
             return list(self._io_requests)
+
+    def record_llm_validation_failure(self, *, code: str) -> None:
+        failure = {"operation": _LLM_OPERATION.get(), "code": code}
+        with self._lock:
+            self._validation_failures.append(failure)
+        self.event("llm_validation_failed", **failure)
 
     def record_llm_request(
         self,
@@ -134,6 +141,8 @@ class RunMetrics:
     def summary_lines(self, *, include_request_details: bool = True) -> list[str]:
         llm_requests = self.llm_requests
         io_requests = self.io_requests
+        with self._lock:
+            validation_failures = list(self._validation_failures)
         lines: list[str] = []
         if llm_requests:
             total_tokens = sum(item.total_tokens or 0 for item in llm_requests)
@@ -143,6 +152,7 @@ class RunMetrics:
             lines.append(
                 "LLM metrics: "
                 f"requests={len(llm_requests)}, retries={retries}, errors={errors}, "
+                f"validation_failures={len(validation_failures)}, "
                 f"request_time_sum={sum(item.elapsed_seconds for item in llm_requests):.2f}s, "
                 f"tokens={total_tokens or 'n/a'}, cache_hit_tokens={cache_tokens or 'n/a'}"
             )
@@ -164,6 +174,11 @@ class RunMetrics:
                         f"total_tokens={item.total_tokens or 'n/a'}, "
                         f"cache_hit_tokens={item.cache_hit_tokens or 'n/a'}"
                     )
+        if validation_failures:
+            lines.append(f"LLM JSON validation: invalid_attempts={len(validation_failures)} (includes repaired responses)")
+            if include_request_details:
+                for failure in validation_failures:
+                    lines.append(f"  operation={failure['operation']}, code={failure['code']}")
         if io_requests:
             lines.append(
                 "Gmail metrics: "

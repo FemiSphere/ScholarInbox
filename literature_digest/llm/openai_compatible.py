@@ -14,7 +14,7 @@ import ssl
 from time import perf_counter, sleep
 from typing import Any
 
-from .base import LLMError, extract_json_object, redact_secrets
+from .base import LLMError, LLMOutputTruncatedError, current_llm_deadline, extract_json_object, redact_secrets
 from ..telemetry import RunMetrics, llm_json_retry, current_llm_operation
 
 
@@ -93,6 +93,9 @@ class OpenAICompatibleClient:
         deadline = _REQUEST_DEADLINE.get()
         if deadline is None:
             deadline = perf_counter() + self._operation_budget()
+        parent_deadline = current_llm_deadline()
+        if parent_deadline is not None:
+            deadline = min(deadline, parent_deadline)
         operation_timeout = self.operation_timeouts.get(operation, self.timeout_seconds)
         attempt_timeout = max(0.001, float(settings.get("timeout_seconds", min(float(self.timeout_seconds), float(operation_timeout)))))
         for attempt in range(max(0, self.max_retries) + 1):
@@ -106,43 +109,63 @@ class OpenAICompatibleClient:
             retryable = False
             failure: Exception | None = None
             status = "ok"
+            finish_reason: str | None = None
+            usage: dict[str, Any] | None = None
             try:
                 payload = self._request_payload(request, timeout)
                 if not isinstance(payload, dict):
                     raise TypeError("response JSON was not an object")
-                content = payload["choices"][0]["message"]["content"]
+                choice = payload["choices"][0]
+                if not isinstance(choice, dict):
+                    raise TypeError("response choice was not an object")
+                raw_usage = payload.get("usage")
+                usage = raw_usage if isinstance(raw_usage, dict) else None
+                raw_finish_reason = choice.get("finish_reason")
+                finish_reason = raw_finish_reason if isinstance(raw_finish_reason, str) or raw_finish_reason is None else "unknown"
+                if finish_reason == "length":
+                    raise LLMOutputTruncatedError(
+                        "OpenAI-compatible API output reached its length limit; partial content was discarded."
+                    )
+                if finish_reason not in (None, "stop"):
+                    if finish_reason not in {"content_filter", "insufficient_system_resource", "aborted"}:
+                        finish_reason = "unknown"
+                    code = finish_reason if finish_reason != "unknown" else "invalid_finish_reason"
+                    raise LLMError(f"OpenAI-compatible API completion failed: {code}", code=code)
+                content = choice["message"]["content"]
                 if not isinstance(content, str):
                     raise TypeError("message content was not a string")
             except urllib.error.HTTPError as exc:
                 status = f"http_{exc.code}"
                 retryable = exc.code in {408, 429, 500, 502, 503, 504}
-                failure = LLMError(f"OpenAI-compatible API failed: HTTP {exc.code}")
+                failure = LLMError(f"OpenAI-compatible API failed: HTTP {exc.code}", code=status)
             except OSError as exc:
-                status = "timeout" if isinstance(exc, TimeoutError) else "network_error"
+                reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+                status = "timeout" if isinstance(reason, TimeoutError) else "network_error"
                 retryable = _transient_network_error(exc)
-                failure = LLMError(f"OpenAI-compatible API request failed: {status} ({type(exc).__name__})")
+                failure = LLMError(f"OpenAI-compatible API request failed: {status} ({type(exc).__name__})", code=status)
             except (json.JSONDecodeError, UnicodeDecodeError, TypeError, KeyError, IndexError) as exc:
                 status = "invalid_response"
-                failure = LLMError(f"OpenAI-compatible API returned an invalid response ({type(exc).__name__})")
+                failure = LLMError(f"OpenAI-compatible API returned an invalid response ({type(exc).__name__})", code=status)
             except LLMError as exc:
-                status = "cancelled"
+                status = exc.code
                 failure = exc
             if failure is None:
-                self._record_request(started_at, prompt, attempt, usage=payload.get("usage"))
+                self._record_request(started_at, prompt, attempt, usage=usage)
                 self._event("llm_request_finished", operation=operation, attempt=attempt + 1,
                             status="ok", elapsed_seconds=round(perf_counter() - started_at, 3),
-                            finish_reason=payload["choices"][0].get("finish_reason"))
+                            finish_reason=finish_reason)
                 self._check_budget(deadline)
                 return content.strip()
-            self._record_request(started_at, prompt, attempt, status=status)
+            self._record_request(started_at, prompt, attempt, status=status, usage=usage)
             self._event("llm_request_finished", operation=operation, attempt=attempt + 1,
-                        status=status, elapsed_seconds=round(perf_counter() - started_at, 3))
+                        status=status, elapsed_seconds=round(perf_counter() - started_at, 3),
+                        finish_reason=finish_reason)
             if not retryable or attempt >= max(0, self.max_retries):
                 raise failure
             self._check_budget(deadline)
             delay = max(0.0, self.retry_backoff_seconds) * (2**attempt)
             if delay >= deadline - perf_counter():
-                raise LLMError("OpenAI-compatible API total request budget exhausted before retry")
+                raise LLMError("OpenAI-compatible API total request budget exhausted before retry", code="budget_exhausted")
             self._event("llm_retry_wait", operation=operation, next_attempt=attempt + 2,
                         delay_seconds=delay, previous_status=status)
             cancel_event = getattr(self.metrics, "cancel_event", None)
@@ -151,7 +174,7 @@ class OpenAICompatibleClient:
             else:
                 sleep(delay)
             self._check_budget(deadline)
-        raise LLMError("OpenAI-compatible API request failed")
+        raise LLMError("OpenAI-compatible API request failed", code="network_error")
 
     def _request_payload(self, request: urllib.request.Request, timeout: float) -> Any:
         """Bound wall time even during DNS, TLS, or a slowly trickling response.
@@ -215,12 +238,12 @@ class OpenAICompatibleClient:
     def _check_cancelled(self) -> None:
         event = getattr(self.metrics, "cancel_event", None)
         if event is not None and event.is_set():
-            raise LLMError("OpenAI-compatible API request cancelled")
+            raise LLMError("OpenAI-compatible API request cancelled", code="cancelled")
 
     def _check_budget(self, deadline: float) -> None:
         self._check_cancelled()
         if perf_counter() >= deadline:
-            raise LLMError("OpenAI-compatible API total request budget exhausted")
+            raise LLMError("OpenAI-compatible API total request budget exhausted", code="budget_exhausted")
 
     def _event(self, name: str, **fields: Any) -> None:
         if self.metrics is not None and hasattr(self.metrics, "event"):
@@ -235,6 +258,9 @@ class OpenAICompatibleClient:
         inherited = _REQUEST_DEADLINE.get()
         if inherited is not None:
             deadline = min(deadline, inherited)
+        parent_deadline = current_llm_deadline()
+        if parent_deadline is not None:
+            deadline = min(deadline, parent_deadline)
         token = _REQUEST_DEADLINE.set(deadline)
         try:
             self._check_budget(deadline)
@@ -242,6 +268,7 @@ class OpenAICompatibleClient:
             try:
                 return extract_json_object(first_response)
             except LLMError:
+                self._record_validation_failure("invalid_json")
                 self._check_budget(deadline)
                 retry_prompt = f"""
 {prompt}
@@ -257,11 +284,19 @@ The first character must be `{{` and the last character must be `}}`.
                 try:
                     return extract_json_object(second_response)
                 except LLMError as exc:
+                    self._record_validation_failure("invalid_json")
                     raise LLMError(
-                        "OpenAI-compatible API response did not contain a parseable JSON object after repair."
+                        "OpenAI-compatible API response did not contain a parseable JSON object after repair.",
+                        code="invalid_json",
                     ) from exc
         finally:
             _REQUEST_DEADLINE.reset(token)
+
+    def _record_validation_failure(self, code: str) -> None:
+        if self.metrics is not None and hasattr(self.metrics, "record_llm_validation_failure"):
+            self.metrics.record_llm_validation_failure(code=code)
+        else:
+            self._event("llm_validation_failed", operation=current_llm_operation(), code=code)
 
     def _record_request(
         self,

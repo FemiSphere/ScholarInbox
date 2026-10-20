@@ -49,7 +49,7 @@ def rank_papers(
         batch_number, offset, batch = item
         def on_error(error: LLMError) -> None:
             stage = "论文翻译" if str(error).startswith("论文翻译失败：") else "论文排序"
-            emit(f"{stage} {batch_number}/{total_batches}：LLM 失败（{type(error).__name__}），回退本地规则")
+            emit(f"{stage} {batch_number}/{total_batches}：LLM 失败（{type(error).__name__}，code={getattr(error, 'code', 'llm_error')}），回退本地规则")
         return _rank_batch(
             batch, profile, llm, offset, on_error=on_error,
             separate_translation=separate_translation, abstract_max_chars=abstract_max_chars,
@@ -220,7 +220,7 @@ PAPERS_JSON:
                 by_index[index].update({key: translated[key] for key in ("title_zh", "summary_zh")})
         except LLMError as exc:
             if on_error:
-                on_error(LLMError(f"论文翻译失败：{exc}"))
+                on_error(LLMError(f"论文翻译失败：{exc}", code=exc.code))
 
     result = []
     for local_index, entry in enumerate(entries):

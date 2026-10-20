@@ -35,6 +35,14 @@ class OfflineStubClient:
                 },
                 ensure_ascii=False,
             )
+        if "EMAIL_PAPER_EXTRACTION_JSON" in prompt:
+            # Offline fixtures use the same structural envelope as the live extractor.
+            encoded = prompt.split("CANDIDATE_LINKS_JSON:\n", 1)[1].split("\n\nCANDIDATE_IMAGES_JSON:", 1)[0]
+            links = json.loads(encoded)
+            return json.dumps({"papers": [
+                {"title": item["text"], "url": item["url"], "snippet": "", "image_index": None}
+                for item in links if len(item.get("text", "")) >= 15
+            ]}, ensure_ascii=False)
         if "TRANSLATE_PAPERS_JSON" in prompt:
             return json.dumps({"papers": [
                 {"index": item["index"], "title_zh": f"论文：{item.get('title', '')}",

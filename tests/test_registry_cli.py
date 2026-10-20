@@ -183,7 +183,7 @@ def test_degraded_api_run_preserves_unread_emails_and_registry(tmp_path, monkeyp
     original_rank = cli.rank_papers
 
     def degraded_rank(*args, **kwargs):
-        kwargs["event_callback"]("论文排序 1/1：LLM 失败（LLMError），回退本地规则")
+        kwargs["event_callback"]("论文排序 1/1：LLM 失败（LLMError，code=output_length），回退本地规则")
         return original_rank(*args, **kwargs)
 
     def unexpected_mark(*args, **kwargs):
@@ -198,8 +198,10 @@ def test_degraded_api_run_preserves_unread_emails_and_registry(tmp_path, monkeyp
     assert not (tmp_path / "data" / "paper_registry.json").exists()
     assert "本地规则回退" in output
     assert "邮件保持未读" in output
+    assert "输出超长" in output
+    assert "API 恢复后" not in output
     digest = (tmp_path / "outputs" / "2026-08-20-digest.md").read_text()
     assert "部分条目或推荐使用本地规则回退" in digest
     log = next((tmp_path / "logs").glob("digest-*.log")).read_text()
-    assert "LLM 失败（LLMError）" in log
-    assert "LLM 失败（LLMError）" not in output
+    assert "LLM 失败（LLMError，code=output_length）" in log
+    assert "LLM 失败（LLMError，code=output_length）" not in output
