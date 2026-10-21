@@ -21,7 +21,7 @@ ScholarInbox 使用 `data/paper_registry.json` 保存最近 30 天内见过的�
 ## 写入边界
 
 - 第一次启用且 JSON 不存在时，从近 30 天 Markdown digest 回填。
-- 正式运行只有在 Markdown/HTML 成功写出后才更新 JSON。
+- 正式运行只有在 Markdown/HTML 成功写出且核心任务无回退时才更新 JSON；可选联网失败不阻止该更新。
 - 写入先落到 `.tmp` 文件并 `fsync`，再用 `os.replace()` 原子替换。
 - sample 和 dry-run 可以读取索引进行模拟，但不写入。
 - JSON 记录所有解析出的候选论文，包括未进入最终展示数量范围的低相关条目。

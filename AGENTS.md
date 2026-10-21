@@ -1,57 +1,37 @@
-# AGENTS.md
+# ScholarInbox 维护约定
 
-## Project Goal
+本地 Python 文献日报：Gmail → 邮件分块提取 → 去重 → 相关性初筛 → 可选原始摘要补充/复评 → 中文翻译 → MD/HTML。
+研究兴趣以 `research_interests.md` 为准；不要在本文件复制画像或固化模型名。
 
-This project builds a local literature digest workflow for researchers who track papers through academic email alerts.
+## 先读什么
 
-The system shall:
-1. Read recent academic alert emails from a dedicated Gmail account that subscribes to Google Scholar alerts and other journals/sources.
-2. Extract paper entries from Google Scholar alerts and journal alert emails.
-3. Deduplicate papers by DOI, URL, normalized title, and fuzzy title similarity.
-4. Rank relevance to the user's research interests.
-5. Translate and summarize paper titles, abstracts, and content into Chinese.
-6. Generate Markdown and HTML digests.
-7. Optionally send the digest by email.
+- 从 [代码与测试地图](docs/code-map.md) 选本次相关模块，再读源码；仅需使用程序时看 [README](README.md)。
+- 排障看 [维护指南](docs/maintenance.md)；其他专题按 [文档索引](docs/README.md) 按需读取。
+- `docs/history/` 是历史证据，不是当前参数；默认不读。当前行为以源码、合并配置和测试为准。
+- 搜索限定 `literature_digest/`、`tests/`、`scripts/` 或指定文档；先 `rg -n` 定位符号，再读取必要片段。
+- 不批量扫描 `outputs/`、`logs/`、`data/`、`.git/`、环境目录。看日志先选最新 1–2 次运行，只提取阶段、错误码和耗时。
 
-## Research Interests
+## 修改边界
 
-The default sample interests prioritize papers related to:
-- computational materials science
-- AI for materials
-- pentagonal materials (especially those with pentagon-based structural motifs, e.g., penta-graphene): atomic systems, framework materials (COF, MOF)
-- machine-learning interatomic potentials
-- thermal transport, phonons, thermal conductivity
+- 修改前检查 `git status`，保留可恢复版本；有用户未提交改动时不得覆盖或混入提交。
+- 保持入口、配置、凭据和运行目录路径兼容。新增依赖须有必要性，优先现有依赖及标准库。
+- 不输出/提交 `.env`、OAuth 文件、`*.local.yaml`、令牌备份、邮件正文或完整模型响应。
+- 不删除邮件。常规验证用离线 sample；真实 Gmail/API 验证明确定义范围与费用，dry-run 仍可能产生 API 费用和本地文件。
+- 原有日报、日志、去重索引及本地配置不作为临时垃圾清除；测试中间文件放临时目录并自动清理。
 
-## Engineering Constraints
+## 必须保持的行为
 
-- Use Python.
-- Prefer a small, reproducible project structure.
-- Store secrets outside git.
-- Never print API keys, OAuth tokens, refresh tokens, or email credentials.
-- Keep `config.local.yaml`, `credentials.json`, `token.json`, `.env`, and `data/` out of git.
-- First implement a dry-run mode before sending real emails.
-- Add tests for parsing and deduplication.
-- Do not delete emails.
-- Provide an option to mark emails as read (configurable).
-- The project shall also include a maintainable document for recent research interests, allowing the daily digest's recommendation priority to be updated based on textual descriptions of current research interests.
+- 长邮件保留有序条目、链接、图片引用及尾部；`length` 丢弃部分 JSON，拆失败块，不重发相同超大输入。成功块保留，整封无回退才缓存。
+- 排序/复评使用思考模式，邮件提取、摘要定位和翻译使用非思考模式；翻译不得覆盖分析评级。
+- 邮件片段与核验摘要分开；Search 概述不是原始摘要。身份匹配后才使用来源摘要，不推断未读全文的结论。
+- 核心提取/初筛/翻译回退时，不标已读、不更新索引；可选联网/复评失败保留初筛，不能污染全局取消状态。
+- 终端保留进度与结果入口，细节进日志；HTML 保持简洁，摘要来源可链接，不展示评级变化说明。保留 OSC 8 文件链接。
+- 新增缓存必须有容量/保留期和异常清理；Search/Fetch 原始页面仅存内存，现有摘要缓存有界。
 
-## Expected Output
+## 配置与验证
 
-The daily digest should include:
-1. Overall statistics:
-   - emails read
-   - paper entries extracted
-   - duplicates removed
-   - high-relevance papers
-   - medium-relevance papers
-   - Summary of Recent Research Interests
-2. High-relevance papers, with Chinese summary and paper links. (Can be stratified by research keywords.)
-3. Medium-relevance papers, with short Chinese notes and paper links. (Can be stratified by research keywords.)
-4. Low-relevance papers, optionally listed only by title and link. (Can be stratified by research keywords.)
-
-## Verification
-
-Before considering a change complete:
-- Run unit tests.
-- Run the workflow in dry-run mode.
-- Confirm a Markdown digest is created in `outputs/`.
+- 配置：`config.py:DEFAULT_CONFIG` → 主 YAML → `llm.config_path` 外置配置覆盖 LLM → 操作设置；详见维护指南。
+- 使用项目 Python，不向 base 环境安装依赖。本机已有 `literature-digest-mac` Conda 环境；跨机器使用 `.venv` 或启动脚本。
+- 先运行所改模块的测试；代码/运行行为变化后跑全套 `python -B -m pytest -q`，渲染/编排变化再跑离线 sample 并检查 MD/HTML。
+- 纯文档改动检查链接、路径、参数与 `git diff --check` 即可；不要为验证文档调用真实邮箱或付费 API。
+- 完成时报告改动、验证、未验证边界；行为变化同步对应专题和代码地图，历史证据不冒充当前保证。

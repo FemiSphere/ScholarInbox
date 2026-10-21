@@ -1,342 +1,59 @@
-# DeepSeek API 使用说明：面向文献摘要工作流
+# DeepSeek 配置与操作模式
 
-本文说明如何把本项目的 LLM 后端从 Codex CLI 切换到 DeepSeek API，目标是让文献摘要任务更便宜、更快、更稳定。
+本文记录仓库当前接入机制，不维护平台价格或永久有效的模型名单。模型名称与额度以现用本地配置和当日官方文档为准；早期说明保留在 [历史目录](history/2026-08-20-deepseek-api-guide.md)。
 
-本文依据 DeepSeek 中文 API 文档整理，最近核对日期：2026-08-20。价格、模型名和政策可能变化，正式充值前请再看一次官方文档。
+## 配置入口
 
-官方入口：
+1. 从 [DeepSeek 模板](../config/llm/deepseek.example.yaml) 复制 `config/llm/deepseek.local.yaml`。
+2. 在主配置中设置 `llm.config_path: config/llm/deepseek.local.yaml`。
+3. `.env` 保存 `DEEPSEEK_API_KEY`；YAML 的 `api_key_env` 只填写环境变量名。
+4. 从项目根目录运行，先用 `--sample --dry-run` 检查本地流程。
 
-- DeepSeek API 文档：https://api-docs.deepseek.com/zh-cn/
-- 首次调用 API：https://api-docs.deepseek.com/zh-cn/
-- 模型与价格：https://api-docs.deepseek.com/zh-cn/quick_start/pricing
-- 限速与隔离：https://api-docs.deepseek.com/zh-cn/quick_start/rate_limit
-- JSON Output：https://api-docs.deepseek.com/zh-cn/guides/json_mode
-- 思考模式：https://api-docs.deepseek.com/zh-cn/guides/thinking_mode
+配置合并为：内置默认 → 主 YAML → 外置 LLM YAML 覆盖 `llm`；实际请求再按 operation 应用独立模式、输出额度和预算。排查时读取需要的字段，不输出完整私有配置或 `.env`。
 
-## 1. 你需要理解的几个概念
+## 模式分工
 
-### API
+| operation | 模式 | 职责 |
+| --- | --- | --- |
+| `interest_profile` | 全局默认非思考 | 研究兴趣画像 |
+| `email_extraction` | 非思考 | 提取有序论文条目和邮件片段 |
+| `abstract_extraction` | 非思考 | 复杂网页摘要定位，必须通过原文匹配 |
+| `paper_ranking` | 思考、high | 初筛及补充摘要后的相关性复评 |
+| `paper_translation` | 非思考 | 最终中文标题和概述，不修改评级 |
 
-API 可以理解为“程序调用模型的接口”。本项目会把文献条目、研究兴趣和输出格式要求发送给 DeepSeek，DeepSeek 返回 JSON，程序再把 JSON 写成 Markdown 和 HTML。
+全局 `thinking: disabled` 不代表排序关闭思考。`operation_settings.paper_ranking` 会覆盖全局设置；请求日志记录实际操作、模式和额度，详见 [模式隔离](ranking-thinking-mode.md)。
 
-你不需要手动写 HTTP 请求；本项目已经实现了 OpenAI-compatible API 调用。
+思考请求不发送 `temperature`；非思考请求不发送 `reasoning_effort`。使用模板中的分操作配置，不把所有调用一起切换为思考。
 
-### API Key
+## 接口与可靠性
 
-API Key 是 DeepSeek 识别账号和扣费的密钥，相当于密码。不要写进 git，不要放进公开文档。
+- 对话请求由客户端把 `base_url` 拼接为 `/chat/completions`；支持根地址或带 `/v1` 的地址，避免重复拼接路径。
+- 联网摘要客户端使用官方 `https://api.deepseek.com/v1/tools/search` 与 `/v1/tools/fetch`，共用密钥环境变量。它有独立的请求次数、并发和等待预算，详见 [来源摘要补充](web-abstract-enrichment.md)。
+- JSON 模式要求结构化对象；`finish_reason=length` 不接受部分结果，邮件提取按失败区域递归拆分。
+- 可重试临时网络错误、408/429 和部分 5xx；鉴权、余额、证书等错误不靠重复请求解决。
+- 分操作 socket 超时与整个逻辑请求预算分别设置。不要仅延长 socket 超时或增加重试掩盖卡顿。
+- Search 摘要概述不能当作论文 Abstract；付费查询与模型推理用量分别留在既有指标中。
 
-本项目推荐把它写在项目根目录的 `.env` 文件中：
+## 如何判断故障
 
-```env
-DEEPSEEK_API_KEY=your_deepseek_api_key
-```
+| 证据 | 排查方向 |
+| --- | --- |
+| 401/403 | 认证变量是否存在、密钥/权限；不打印密钥 |
+| 402 | 平台余额或账户限制 |
+| 400/422 | 模型、参数、输出模式是否兼容 |
+| 429 | 并发/服务限流；考虑减少 worker |
+| timeout/network/5xx | 网络、代理、服务端等待；看同次请求时间线 |
+| output_length | 输出预算、条目拆分；不是余额不足证据 |
+| HTTP 200 但无完整正文 | 不能认定成功；看后续正文、保活、截止时间 |
 
-`.env` 已加入 `.gitignore`。
+存在 HTML 不代表所有 API 任务成功，必须查看核心回退提示。更换 key 必须有认证失败等证据；历史服务中断不代表当前服务故障。
 
-### base_url
+## 官方参考
 
-DeepSeek 支持 OpenAI-compatible 格式。OpenAI 格式的 `base_url` 是：
+- [API 文档](https://api-docs.deepseek.com/zh-cn/)
+- [思考模式](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode)
+- [JSON 模式](https://api-docs.deepseek.com/zh-cn/guides/json_mode)
+- [模型与价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing)
+- [错误码](https://api-docs.deepseek.com/quick_start/error_codes/)
 
-```text
-https://api.deepseek.com
-```
-
-本项目会自动拼接 `/chat/completions`，最终调用的是对话补全接口。
-
-### model
-
-模型名决定你调用哪个模型。DeepSeek 当前文档列出的主要模型是：
-
-- `deepseek-flash`
-- `deepseek-v4-pro`
-
-文档也说明 `deepseek-chat` 和 `deepseek-reasoner` 将于 2026-07-24 弃用；新项目不建议再使用旧模型名。
-
-本项目推荐使用：
-
-```yaml
-model: "deepseek-flash"
-```
-
-原因是文献摘要任务主要是分类、翻译和结构化输出，不需要最高等级推理；`v4-flash` 更适合低成本、低延迟运行。
-
-### token
-
-Token 是模型计费和上下文长度的基本单位。可以粗略理解为字、词、数字或标点的切片。
-
-DeepSeek 文档给出的粗略换算是：
-
-- 1 个英文字符约 0.3 token
-- 1 个中文字符约 0.6 token
-
-实际用量以 API 返回的 `usage` 字段为准。
-
-### 输入 token 和输出 token
-
-本项目的一次 LLM 请求大致包括：
-
-- 输入 token：研究兴趣、论文标题、期刊、链接、邮件片段、JSON 输出要求
-- 输出 token：中文标题、相关性、摘要、推荐理由、匹配主题
-
-积压邮件多时，不要只靠增大 `max_output_tokens`。更稳的方式是分批处理，并限制最终低相关条目数量。
-
-### JSON Output
-
-本项目依赖模型返回 JSON，因为程序要稳定解析字段，例如：
-
-```json
-{
-  "papers": [
-    {
-      "index": 0,
-      "relevance": "high",
-      "score": 0.92,
-      "title_zh": "中文题名",
-      "summary_zh": "中文摘要",
-      "reason_zh": "推荐理由",
-      "matched_topics": ["热导率"]
-    }
-  ]
-}
-```
-
-DeepSeek 文档要求：
-
-- 请求中设置 `response_format: {"type": "json_object"}`
-- prompt 中必须包含 `json` 字样，并给出 JSON 示例
-- `max_tokens` 不能太小，否则 JSON 可能被截断
-- JSON Output 仍可能偶发返回空 content，需要通过重试或 prompt 调整缓解
-
-本项目已经做了这些事：
-
-- `response_format_json: true`
-- prompt 中包含 JSON schema
-- 解析失败时会回退，不会删除邮件
-
-### 思考模式
-
-DeepSeek v4 支持思考模式，并且文档说明默认开启。思考模式适合复杂推理，但本项目的日常任务通常不需要。
-
-为了更快、更省钱，本项目 DeepSeek 默认配置关闭思考模式：
-
-```yaml
-extra_body:
-  thinking:
-    type: "disabled"
-```
-
-关闭思考模式后，`temperature` 等普通采样参数才更有意义。文献摘要建议：
-
-```yaml
-temperature: 0.2
-```
-
-如果未来你想让模型做更复杂的跨论文综述，可以再尝试开启思考模式：
-
-```yaml
-reasoning_effort: "high"
-extra_body:
-  thinking:
-    type: "enabled"
-```
-
-但这通常更慢，也可能更贵。
-
-### 上下文硬盘缓存
-
-DeepSeek 文档说明上下文硬盘缓存默认开启，不需要改代码。它会让重复前缀的输入更便宜。
-
-对本项目来说，研究兴趣和 JSON 指令在多次请求中相似，因此可能受益于缓存。但缓存是尽力而为，不保证每次命中。
-
-### 限速和排队
-
-DeepSeek 按账号限制并发，超过限制会返回 HTTP 429。请求发出后，如果服务器排队，连接可能保持一段时间。平台允许的并发上限不等于本项目应采用的并发数；邮件正文和排序批次的请求体较大，因此项目默认限制为 3 个 worker，并在日志中记录延迟、错误率和 token 用量。
-
-本项目建议：
-
-```yaml
-timeout_seconds: 300
-
-openai_compatible:
-  max_retries: 2
-  retry_backoff_seconds: 1.0
-```
-
-如果积压邮件很多或 DeepSeek 服务繁忙，可以把超时调到 600。若 429 较多，应先把 `performance.ranking_max_workers` 和 `parsing_max_workers` 降为 2，而不是继续增加重试。
-
-### 常见错误码
-
-常见问题可以这样理解：
-
-- 400：请求格式错误，多半是参数不兼容
-- 401：API key 错误或没读取到
-- 402：账户余额不足
-- 422：参数错误，例如模型不支持某参数
-- 429：请求过快或并发过高
-- 500/503：服务端故障或繁忙，稍后重试
-
-## 2. 本项目的配置结构
-
-主配置文件只选择一个 LLM 配置文件：
-
-```yaml
-llm:
-  config_path: "config/llm/deepseek.local.yaml"
-```
-
-具体模型参数放在独立文件里：
-
-```text
-config/llm/codex_cli.example.yaml
-config/llm/deepseek.example.yaml
-config/llm/deepseek.local.yaml
-```
-
-其中：
-
-- `*.example.yaml` 是模板，可以提交 git
-- `*.local.yaml` 是本地真实配置，已被 `.gitignore` 忽略
-
-## 3. 第一次启用 DeepSeek
-
-### 第一步：创建 API key
-
-打开 DeepSeek 平台创建 API key：
-
-```text
-https://platform.deepseek.com/
-```
-
-创建后只复制一次，后续平台通常不会再次完整显示。
-
-### 第二步：写入 .env
-
-在项目根目录创建或编辑 `.env`：
-
-```env
-DEEPSEEK_API_KEY=your_deepseek_api_key
-```
-
-不要把 key 写到 README、yaml 模板、聊天记录或 git commit 里。
-
-### 第三步：准备 DeepSeek 本地配置
-
-本项目已经提供模板：
-
-```text
-config/llm/deepseek.example.yaml
-```
-
-复制为：
-
-```text
-config/llm/deepseek.local.yaml
-```
-
-推荐内容：
-
-```yaml
-provider: "openai_compatible"
-timeout_seconds: 300
-max_output_tokens: 4000
-
-openai_compatible:
-  base_url: "https://api.deepseek.com"
-  api_key_env: "DEEPSEEK_API_KEY"
-  model: "deepseek-flash"
-  temperature: 0.2
-  reasoning_effort: ""
-  response_format_json: true
-  max_retries: 2
-  retry_backoff_seconds: 1.0
-  extra_body:
-    thinking:
-      type: "disabled"
-```
-
-### 第四步：主配置指向 DeepSeek
-
-在 `config.local.yaml` 中设置：
-
-```yaml
-llm:
-  config_path: "config/llm/deepseek.local.yaml"
-```
-
-### 第五步：先跑 sample
-
-```powershell
-python -m literature_digest --dry-run --sample
-```
-
-如果 sample 成功，再跑真实 Gmail：
-
-```powershell
-python -m literature_digest --dry-run --max-emails 5
-```
-
-## 4. 推荐参数怎么选
-
-### 日常低成本配置
-
-适合每周或每几天处理一次：
-
-```yaml
-model: "deepseek-flash"
-temperature: 0.2
-max_output_tokens: 4000
-extra_body:
-  thinking:
-    type: "disabled"
-```
-
-### 邮件积压很多时
-
-建议分批，而不是一次塞入 200 封：
-
-```powershell
-python -m literature_digest --max-emails 50
-```
-
-如果你打开了：
-
-```yaml
-gmail:
-  mark_as_read: true
-```
-
-每次成功处理后会把这批邮件标记为已读，下一次运行会继续处理剩余未读邮件。
-
-如果仍在 dry-run，邮件不会标记已读，每次会重复处理同一批。
-
-### 输出太长时
-
-优先调这些：
-
-```yaml
-digest:
-  max_high_relevance: 20
-  max_medium_relevance: 30
-  max_low_relevance: 80
-```
-
-不建议把 `max_output_tokens` 设置得很大来解决最终文件变长的问题。`max_output_tokens` 是单次模型返回上限；最终 Markdown/HTML 文件是本地生成的。
-
-## 5. 安全注意事项
-
-- API key 只放 `.env`
-- `config/llm/*.local.yaml` 不提交 git
-- 不在日志中打印 API key
-- 不把 `token.json`、`credentials.json`、`.env` 发给别人
-- 先 dry-run，再考虑 `mark_as_read: true`
-
-## 6. 当前项目里的文件分工
-
-- `config.example.yaml`：主配置模板，只选择一个 LLM 配置文件
-- `config.local.yaml`：你的本地主配置，已忽略
-- `config/llm/codex_cli.example.yaml`：Codex CLI 模板
-- `config/llm/deepseek.example.yaml`：DeepSeek 模板
-- `config/llm/deepseek.local.yaml`：你的 DeepSeek 本地配置，已忽略
-- `.env`：保存 `DEEPSEEK_API_KEY`
-
-当前代码中的 LLM 调用顺序、历史日志、已实施优化和离线基准见 [`architecture-and-performance.md`](architecture-and-performance.md)。
+修改接入参数前核对官方文档与可用模型；这些链接是参考入口，本次文档整理未重新探测 DeepSeek 服务。
