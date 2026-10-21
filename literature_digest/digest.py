@@ -4,6 +4,7 @@ import json
 import os
 from html import escape
 from pathlib import Path
+from urllib.parse import quote, urlsplit
 
 from .models import DigestRun, RankedPaper
 
@@ -625,6 +626,9 @@ def _append_markdown_section(lines: list[str], title: str, papers: list[RankedPa
             lines.append("- TOC/邮件图片：")
             for image_path in entry.image_paths:
                 lines.append(f"  - ![]({image_path})")
+        source_url = _evidence_source_url(paper)
+        if source_url:
+            lines.append(f"- 摘要来源：[原始摘要](<{source_url}>)")
         lines.append(f"- 来源邮件：{entry.source_subject} | {entry.source_sender}")
         lines.append("")
 
@@ -699,6 +703,9 @@ def _render_paper_card(paper: RankedPaper, index: int, output_dir: str | Path | 
     )
     venue_html = escape(entry.venue or "未识别")
     doi_html = f'<span>DOI: <code>{escape(entry.doi)}</code></span>' if entry.doi else ""
+    source_url = _evidence_source_url(paper)
+    abstract_source_html = (f'<p class="meta">摘要来源：<a href="{escape(source_url, quote=True)}" '
+        'target="_blank" rel="noreferrer">原始摘要</a></p>' if source_url else "")
     compact = paper.relevance in {"low", "irrelevant"}
     summary_html = "" if compact else f'<p class="summary">{escape(paper.summary_zh)}</p>'
     details_summary = "查看摘要、判断理由与来源" if compact else "查看判断理由与来源"
@@ -721,12 +728,28 @@ def _render_paper_card(paper: RankedPaper, index: int, output_dir: str | Path | 
           <p>{escape(paper.reason_zh)}</p>
           <p class="meta">来源邮件：{escape(entry.source_subject)} | {escape(entry.source_sender)}</p>
           {doi_html}
+          {abstract_source_html}
         </details>
         {image_html}
         <div class="actions">{original_link}</div>
       </article>
 """
 
+
+
+def _evidence_source_url(paper: RankedPaper) -> str:
+    if paper.evidence is None:
+        return ""
+    url = paper.evidence.source_url
+    if not isinstance(url, str) or any(ord(char) < 32 for char in url):
+        return ""
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+            return ""
+    except ValueError:
+        return ""
+    return quote(url, safe=":/?&=%#@+;,~!$'()*[]")
 
 def _render_images(paths: list[Path | str], output_dir: str | Path | None) -> str:
     if not paths:

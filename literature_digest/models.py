@@ -66,6 +66,17 @@ class InterestProfile:
 
 
 @dataclass(slots=True)
+class EvidenceRecord:
+    """Identity-matched source abstract; retained separately from original email data."""
+    abstract: str
+    source_url: str
+    source_kind: str
+    fetched_at: str
+    matched_by: str
+    identity: str
+
+
+@dataclass(slots=True)
 class RankedPaper:
     entry: PaperEntry
     relevance: RelevanceLevel
@@ -74,6 +85,7 @@ class RankedPaper:
     summary_zh: str
     reason_zh: str
     matched_topics: list[str] = field(default_factory=list)
+    evidence: EvidenceRecord | None = None
 
 
 @dataclass(slots=True)

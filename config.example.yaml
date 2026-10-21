@@ -146,3 +146,18 @@ performance:
   email_budget_seconds: 240
   email_max_links: 50
   email_max_images: 20
+
+# 高/中相关论文补充摘要，失败保留初筛；仅 DeepSeek 正式运行启用。
+web_enrichment:
+  enabled: true
+  max_papers: 30
+  max_requests: 80
+  max_workers: 3
+  budget_seconds: 180
+  retrieval_budget_seconds: 90
+  request_timeout_seconds: 12
+  cache_enabled: true
+  cache_path: "data/cache/web_evidence.sqlite3"
+  cache_max_entries: 300
+  cache_max_bytes: 8388608
+  cache_ttl_days: 30

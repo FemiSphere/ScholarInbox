@@ -31,7 +31,9 @@ from .paper_registry import (
     PaperRegistryError,
     bootstrap_registry_from_markdown,
 )
-from .ranking import count_relevance, rank_papers
+from .ranking import count_relevance, rank_papers, translate_ranked_papers
+from .enrichment import enrich_ranked_papers
+from urllib.parse import urlsplit
 from .sample_data import sample_emails
 from .telemetry import RunMetrics
 from .ui import ProgressReporter
@@ -314,6 +316,12 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             progress.detail("近期研究兴趣画像命中本地缓存")
         else:
             progress.detail("近期研究兴趣画像已更新")
+        api_config = config.get("llm", {}).get("openai_compatible", {})
+        enrichment_enabled = (
+            not sample_mode and config.get("web_enrichment", {}).get("enabled", True)
+            and config["llm"].get("provider") == "openai_compatible"
+            and urlsplit(api_config.get("base_url", "")).hostname == "api.deepseek.com"
+        )
         progress.detail(f"调用 LLM 分批排序和摘要：{len(candidate_entries)} 篇论文")
         batch_size = int(config["performance"].get("ranking_batch_size", 10))
         progress.item(0, (len(candidate_entries) + batch_size - 1) // batch_size, "论文排序与中文摘要")
@@ -322,6 +330,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             interest_profile,
             llm,
             batch_size=batch_size,
+            analysis_only=enrichment_enabled,
             separate_translation=bool(config["performance"].get("separate_translation", True)),
             abstract_max_chars=int(config["performance"].get("ranking_abstract_max_chars", 2000)),
             max_workers=int(config["performance"].get("ranking_max_workers", 3)),
@@ -329,6 +338,28 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             event_callback=report_detail,
             cancel_event=metrics.cancel_event,
         )
+        if enrichment_enabled:
+            if not fallback_count:
+                try:
+                    ranked = enrich_ranked_papers(
+                        ranked, interest_profile, llm, config, base_dir=base_dir,
+                        metrics=metrics, cancel_event=metrics.cancel_event,
+                        progress=lambda label, current, total: report_items(current, total, label),
+                        detail=progress.detail,
+                    )
+                except Exception as exc:
+                    # Optional source enrichment must not invalidate core processing.
+                    metrics.event("web_enrichment_unavailable", reason=type(exc).__name__)
+                    progress.detail(f"联网摘要补充未完成，保留初筛结果：{type(exc).__name__}")
+            else:
+                progress.detail("核心提取或初筛出现回退，本次跳过可选联网补充")
+            progress.item(0, (len(ranked) + batch_size - 1) // batch_size, "生成中文阅读摘要")
+            ranked = translate_ranked_papers(
+                ranked, llm, batch_size=batch_size,
+                max_workers=int(config["performance"].get("ranking_max_workers", 3)),
+                progress=lambda current, total: report_items(current, total, "生成中文阅读摘要"),
+                event_callback=report_detail, cancel_event=metrics.cancel_event,
+            )
         progress.detail("LLM 排序和摘要完成")
     else:
         if deduped.unique_entries and registry_duplicates_removed:

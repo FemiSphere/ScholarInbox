@@ -35,6 +35,11 @@ operation_settings:
     max_output_tokens: 4000
     timeout_seconds: 90
     request_budget_seconds: 120
+  abstract_extraction:
+    thinking: disabled
+    max_output_tokens: 6000
+    timeout_seconds: 30
+    request_budget_seconds: 45
   email_extraction:
     thinking: disabled
     max_output_tokens: 8000
