@@ -359,3 +359,65 @@ def test_direct_arxiv_spacing_and_events(monkeypatch):
     assert 2.5 < pauses[1] <= 3
     assert [name for name, fields in events].count('arxiv_direct_end') == 2
     assert all(fields['status'] == 'ok' for name, fields in events if name == 'arxiv_direct_end')
+
+@pytest.mark.parametrize('headers', [False, True])
+def test_timeout_reports_request_local_phase_without_late_events(transport, monkeypatch, headers):
+    release = Event()
+    events = []
+    class Metrics:
+        def event(self, name, **fields):
+            events.append((name, fields))
+    class SlowResponse(Response):
+        status = 200
+        def read(self, *args):
+            release.wait(2)
+            return b'{}'
+    def opener(*args, **kwargs):
+        if not headers:
+            release.wait(2)
+        return SlowResponse(b'{}')
+    monkeypatch.setattr('urllib.request.urlopen', opener)
+    transport.metrics = Metrics()
+    transport.timeout_seconds = .03
+    try:
+        with pytest.raises(EvidenceUnavailable, match='timeout'):
+            transport.fetch(URL)
+        finished = [fields for name, fields in events if name == 'evidence_request_finished']
+        assert len(finished) == 1
+        assert finished[0]['phase'] == ('reading_body' if headers else 'awaiting_headers')
+        assert finished[0]['http_status'] == (200 if headers else None)
+    finally:
+        release.set()
+    time.sleep(.01)
+    assert len([name for name, fields in events if name == 'evidence_request_finished']) == 1
+
+
+def test_search_timeout_can_be_shorter_than_fetch(transport, monkeypatch):
+    timeouts = []
+    def opener(request, timeout):
+        timeouts.append(timeout)
+        return Response(b'{"results": [], "content": "abstract"}')
+    monkeypatch.setattr('urllib.request.urlopen', opener)
+    transport.timeout_seconds = 40
+    transport.search_timeout_seconds = 12
+    transport.search('test')
+    transport.fetch(URL)
+    assert timeouts == [12, 40]
+
+
+def test_search_source_content_is_used_before_slow_doi_redirect():
+    response = dict(page(), url=URL)
+    client = FakeClient(results=[response])
+    result = acquire_evidence(paper(), client)
+    assert result.abstract == ABSTRACT
+    assert client.fetches == [URL]
+    assert client.queries == [DOI.lower()]
+
+
+def test_all_search_content_checked_before_fetching_first_candidate():
+    first = 'https://nature.com/articles/another-candidate'
+    second = 'https://pubs.acs.org/doi/' + DOI
+    client = FakeClient(results=[{'url': first}, dict(page(), url=second)])
+    result = acquire_evidence(paper(), client)
+    assert result.abstract == ABSTRACT
+    assert client.fetches == [URL]

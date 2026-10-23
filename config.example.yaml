@@ -130,7 +130,7 @@ telemetry:
 
 performance:
   # 整次运行预算；0 关闭。到期取消后续请求，保留缓存和指标。
-  run_timeout_seconds: 600
+  run_timeout_seconds: 900
   # LLM 请求有限并发；遇到限流可降为 2，设为 1 可恢复串行。
   parsing_max_workers: 3
   ranking_max_workers: 3
@@ -153,11 +153,12 @@ web_enrichment:
   max_papers: 30
   max_requests: 80
   max_workers: 3
-  budget_seconds: 180
-  paper_budget_seconds: 20
+  budget_seconds: 480
+  paper_budget_seconds: 60
   max_retries: 0
-  retrieval_budget_seconds: 90
-  request_timeout_seconds: 12
+  retrieval_budget_seconds: 360
+  request_timeout_seconds: 40
+  search_timeout_seconds: 12
   cache_enabled: true
   cache_path: "data/cache/web_evidence.sqlite3"
   cache_max_entries: 300

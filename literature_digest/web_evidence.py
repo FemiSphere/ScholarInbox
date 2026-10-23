@@ -65,6 +65,7 @@ class WebEvidenceClient:
     metrics: Any = None
     cancel_event: Event | None = None
     timeout_seconds: float = 12
+    search_timeout_seconds: float = 12
     budget_seconds: float = 120
     max_requests: int = 80
     search_count: int = 3
@@ -127,16 +128,22 @@ class WebEvidenceClient:
                 headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
             )
             results: Queue[tuple[bool, Any]] = Queue(maxsize=1)
-            timeout = max(0.001, min(self.timeout_seconds, remaining))
+            timeout = max(0.001, min(self.timeout_seconds, self.search_timeout_seconds if operation == "search" else self.timeout_seconds, remaining))
             self._event("evidence_request_started", operation=operation, attempt=attempt + 1, timeout_seconds=timeout)
 
             acquired = self._network_slots.acquire(timeout=min(0.1, timeout))
             if not acquired:
                 raise EvidenceUnavailable("network_capacity")
-            def fetch(request=request, timeout=timeout, results=results) -> None:
+            state = {"phase": "awaiting_headers", "http_status": None}
+            state_lock = Lock()
+            def fetch(request=request, timeout=timeout, results=results, state=state, state_lock=state_lock) -> None:
                 try:
                     with urllib.request.urlopen(request, timeout=timeout) as response:
+                        with state_lock:
+                            state.update(phase="reading_body", http_status=getattr(response, "status", None))
                         payload = response.read(self.max_response_bytes + 1)
+                    with state_lock:
+                        state["phase"] = "decoding_response"
                     if len(payload) > self.max_response_bytes:
                         raise EvidenceUnavailable("response_too_large")
                     decoded = json.loads(payload.decode("utf-8"))
@@ -144,6 +151,8 @@ class WebEvidenceClient:
                         raise EvidenceUnavailable("invalid_response")
                 except urllib.error.HTTPError as exc:
                     status = exc.code
+                    with state_lock:
+                        state.update(phase="http_error", http_status=status)
                     exc.close()
                     results.put((False, EvidenceUnavailable(f"http_{status}")))
                 except EvidenceUnavailable as exc:
@@ -177,8 +186,10 @@ class WebEvidenceClient:
                 except Empty:
                     continue
             status = "ok" if ok else result.code
+            with state_lock:
+                diagnostics = dict(state)
             self._event("evidence_request_finished", operation=operation, attempt=attempt + 1,
-                        status=status, elapsed_seconds=round(time.monotonic() - started, 3))
+                        status=status, elapsed_seconds=round(time.monotonic() - started, 3), **diagnostics)
             if ok:
                 return result
             transient = status in {"timeout", "network_error", "http_408", "http_429", "http_500", "http_502", "http_503", "http_504"}
@@ -539,11 +550,11 @@ def acquire_evidence(entry: Any, client: Any, llm: Any = None, *, max_searches: 
         if evidence is not None:
             return evidence
     doi = _doi_key(getattr(entry, "doi", ""))
-    if doi:
-        evidence = fetched("https://doi.org/" + doi)
-        if evidence is not None:
-            return evidence
     if max_searches <= 0:
+        if doi:
+            evidence = fetched("https://doi.org/" + doi)
+            if evidence is not None:
+                return evidence
         if last_failure is not None:
             raise last_failure
         return None
@@ -552,13 +563,20 @@ def acquire_evidence(entry: Any, client: Any, llm: Any = None, *, max_searches: 
         results = client.search(query)
     except EvidenceUnavailable:
         raise
+    pending_urls = []
+    # Inspect all supplied source content before spending another slow Fetch.
     for result in results:
         target = canonical_source_url(str(result.get("url", "")))
         if source_kind(target) is None:
             continue
         evidence = inspect(result, target) if isinstance(result.get("content"), str) and result["content"].strip() else None
-        if evidence is None:
-            evidence = fetched(target)
+        if evidence is not None:
+            return evidence
+        pending_urls.append(target)
+    if doi:
+        pending_urls.append("https://doi.org/" + doi)
+    for target in pending_urls:
+        evidence = fetched(target)
         if evidence is not None:
             return evidence
     if last_failure is not None:

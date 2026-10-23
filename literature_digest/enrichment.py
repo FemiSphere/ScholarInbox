@@ -64,7 +64,7 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
     if not targets:
         return papers
     started = monotonic()
-    deadline = started + max(0.0, float(options.get('budget_seconds', 180)))
+    deadline = started + max(0.0, float(options.get('budget_seconds', 480)))
     cancel = cancel_event if cancel_event is not None else Event()
     def log(event, **fields):
         if metrics is not None:
@@ -78,8 +78,9 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
     client = client or WebEvidenceClient(
         base_url='https://api.deepseek.com', api_key_env=api.get('api_key_env', 'DEEPSEEK_API_KEY'),
         metrics=metrics, cancel_event=cancel,
-        timeout_seconds=float(options.get('request_timeout_seconds', 12)),
-        budget_seconds=min(float(options.get('retrieval_budget_seconds', 90)), max(0, deadline - monotonic())),
+        timeout_seconds=float(options.get('request_timeout_seconds', 40)),
+        search_timeout_seconds=float(options.get('search_timeout_seconds', 12)),
+        budget_seconds=min(float(options.get('retrieval_budget_seconds', 360)), max(0, deadline - monotonic())),
         max_requests=int(options.get('max_requests', 80)),
         search_count=3, min_interval_seconds=0.5,
         max_retries=max(0, int(options.get("max_retries", 0))),
@@ -96,7 +97,7 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
                 ttl_days=float(options.get('cache_ttl_days', 30)), negative_ttl_hours=6)
         except (CacheError, OSError, ValueError):
             log('web_cache_unavailable')
-    log('web_enrichment_started', candidates=len(targets), budget_seconds=options.get('budget_seconds', 180))
+    log('web_enrichment_started', candidates=len(targets), budget_seconds=options.get('budget_seconds', 480))
     try:
         if progress:
             progress('补充论文摘要', 0, len(targets))
@@ -112,12 +113,12 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
                     if evidence is not None:
                         log('web_cache_hit', paper=key[:12])
                         return evidence
-                    if isinstance(record, dict) and record.get('status') == 'missing' and record.get('policy') == 2:
+                    if isinstance(record, dict) and record.get('status') == 'missing' and record.get('policy') == 3:
                         return None
                 except (CacheError, OSError):
                     log('web_cache_read_failed')
             try:
-                with llm_time_budget(min(float(options.get("paper_budget_seconds", 20)),
+                with llm_time_budget(min(float(options.get("paper_budget_seconds", 60)),
                                          max(0, deadline - monotonic()))):
                     evidence = acquire_evidence(paper.entry, client, llm)
             except Exception as exc:
@@ -132,7 +133,7 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
             if cache is not None:
                 try:
                     cache.put(key, {'status': 'verified', 'evidence': asdict(evidence)} if evidence else
-                              {'status': 'missing', 'policy': 2}, negative=evidence is None)
+                              {'status': 'missing', 'policy': 3}, negative=evidence is None)
                 except (CacheError, OSError):
                     log('web_cache_write_failed')
             log('web_evidence_result', paper=key[:12], status='verified' if evidence else 'not_found',

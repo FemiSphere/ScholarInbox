@@ -185,3 +185,21 @@ def test_old_negative_cache_does_not_hide_new_source_strategy(tmp_path, monkeypa
     monkeypatch.setattr(module, 'acquire_evidence', lambda *args: calls.append(1))
     module.enrich_ranked_papers(original, InterestProfile(), object(), configuration(), base_dir=tmp_path,client=object())
     assert calls == [1]
+
+
+def test_expanded_budget_and_search_timeout_are_wired(tmp_path, monkeypatch):
+    from literature_digest.config import DEFAULT_CONFIG
+    captured = {}
+    def client(**kwargs):
+        captured.update(kwargs)
+        return object()
+    monkeypatch.setattr(module, 'WebEvidenceClient', client)
+    monkeypatch.setattr(module, 'acquire_evidence', lambda *args: None)
+    module.enrich_ranked_papers([paper('Budget test', 'high', .9)], InterestProfile(), object(),
+        DEFAULT_CONFIG, base_dir=tmp_path)
+    assert captured['budget_seconds'] == 360
+    assert captured['timeout_seconds'] == 40
+    assert captured['search_timeout_seconds'] == 12
+    assert captured['max_requests'] == 80
+    assert captured['max_retries'] == 0
+    assert DEFAULT_CONFIG['performance']['run_timeout_seconds'] == 900
