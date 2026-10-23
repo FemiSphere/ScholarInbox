@@ -85,7 +85,9 @@ def test_refinement_failure_preserves_initial_ranking(tmp_path,monkeypatch):
         kwargs['event_callback']('回退本地规则');return []
     monkeypatch.setattr(module,'rank_papers',invalid)
     original=[paper('Distinctive original title','high',.9)]
-    assert module.enrich_ranked_papers(original,InterestProfile(),object(),configuration(),base_dir=tmp_path,client=object())==original
+    updated = module.enrich_ranked_papers(original,InterestProfile(),object(),configuration(),base_dir=tmp_path,client=object())
+    assert updated[0].relevance == original[0].relevance
+    assert updated[0].evidence == evidence()
 
 
 def test_candidates_and_disabled_cache_are_bounded(tmp_path,monkeypatch):
@@ -143,7 +145,8 @@ def test_unexpected_optional_refinement_error_does_not_cancel_run(tmp_path, monk
     original = [paper('Distinctive original title', 'high', .9)]
     updated = module.enrich_ranked_papers(original, InterestProfile(), BrokenClient(),
         configuration(), base_dir=tmp_path, client=object(), cancel_event=cancel)
-    assert updated == original
+    assert updated[0].relevance == original[0].relevance
+    assert updated[0].evidence == evidence()
     assert not cancel.is_set()
 
 
@@ -159,3 +162,26 @@ def test_repository_abstract_cache_is_reusable():
     from dataclasses import asdict
     item = replace(evidence(), source_kind='repository_abstract')
     assert module._cached_evidence({'status': 'verified', 'evidence': asdict(item)}) == item
+
+
+def test_acquisition_receives_per_paper_deadline(tmp_path, monkeypatch):
+    from literature_digest.llm.base import current_llm_deadline
+    from time import perf_counter
+    remaining = []
+    def acquire(*args):
+        remaining.append(current_llm_deadline() - perf_counter())
+    monkeypatch.setattr(module, 'acquire_evidence', acquire)
+    module.enrich_ranked_papers([paper('Bounded paper', 'high', .9)], InterestProfile(), object(),
+        configuration(paper_budget_seconds=2,cache_enabled=False), base_dir=tmp_path,client=object())
+    assert 0 < remaining[0] <= 2
+
+
+def test_old_negative_cache_does_not_hide_new_source_strategy(tmp_path, monkeypatch):
+    from literature_digest.evidence_cache import EvidenceCache
+    original = [paper('Retry old missing source', 'high', .9)]
+    with EvidenceCache(tmp_path/'cache.sqlite3') as cache:
+        cache.put(module.evidence_key(original[0].entry), {'status': 'missing'}, negative=True)
+    calls = []
+    monkeypatch.setattr(module, 'acquire_evidence', lambda *args: calls.append(1))
+    module.enrich_ranked_papers(original, InterestProfile(), object(), configuration(), base_dir=tmp_path,client=object())
+    assert calls == [1]

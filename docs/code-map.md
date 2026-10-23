@@ -13,7 +13,7 @@
 | DOI/URL/标题批内去重 | `dedupe.py` | `test_dedupe.py` |
 | 跨日期去重/首次从旧日报回填 | `paper_registry.py`、`recent_outputs.py` | `test_paper_registry.py`、`test_recent_outputs.py`、`test_registry_cli.py` |
 | 相关性、分析与翻译隔离 | `ranking.py:rank_papers/_paper_input/translate_ranked_papers` | `test_ranking_separation.py`、`test_ranking_modes_integration.py`、`test_ranking_evidence.py` |
-| Search/Fetch、论文身份/摘要核验 | `web_evidence.py:WebEvidenceClient/acquire_evidence/extract_abstract` | `test_web_evidence.py` |
+| Search/Fetch、论文身份/摘要核验 | `web_evidence.py:WebEvidenceClient/direct_arxiv/acquire_evidence/extract_abstract` | `test_web_evidence.py` |
 | 高/中相关补充、复评与可选失败 | `enrichment.py:enrich_ranked_papers` | `test_enrichment_pipeline.py` |
 | SQLite 摘要缓存/容量/过期 | `evidence_cache.py:EvidenceCache` | `test_evidence_cache.py` |
 | HTTP 等待、重试、JSON/length、操作模式 | `llm/openai_compatible.py:OpenAICompatibleClient`、`llm/base.py` | `test_api_resilience.py`、`test_api_output_validation.py`、`test_operation_settings.py` |

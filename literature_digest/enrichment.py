@@ -1,7 +1,7 @@
 """Optional, bounded abstract enrichment; never persists fetched pages or run intermediates."""
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from hashlib import sha256
 from pathlib import Path
 from threading import Event
@@ -82,6 +82,7 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
         budget_seconds=min(float(options.get('retrieval_budget_seconds', 90)), max(0, deadline - monotonic())),
         max_requests=int(options.get('max_requests', 80)),
         search_count=3, min_interval_seconds=0.5,
+        max_retries=max(0, int(options.get("max_retries", 0))),
     )
     cache = None
     if options.get('cache_enabled', True):
@@ -111,12 +112,13 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
                     if evidence is not None:
                         log('web_cache_hit', paper=key[:12])
                         return evidence
-                    if isinstance(record, dict) and record.get('status') == 'missing':
+                    if isinstance(record, dict) and record.get('status') == 'missing' and record.get('policy') == 2:
                         return None
                 except (CacheError, OSError):
                     log('web_cache_read_failed')
             try:
-                with llm_time_budget(max(0, deadline - monotonic())):
+                with llm_time_budget(min(float(options.get("paper_budget_seconds", 20)),
+                                         max(0, deadline - monotonic()))):
                     evidence = acquire_evidence(paper.entry, client, llm)
             except Exception as exc:
                 # Optional errors never enter the core fallback/read-state signal.
@@ -130,16 +132,21 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
             if cache is not None:
                 try:
                     cache.put(key, {'status': 'verified', 'evidence': asdict(evidence)} if evidence else
-                              {'status': 'missing'}, negative=evidence is None)
+                              {'status': 'missing', 'policy': 2}, negative=evidence is None)
                 except (CacheError, OSError):
                     log('web_cache_write_failed')
+            log('web_evidence_result', paper=key[:12], status='verified' if evidence else 'not_found',
+                source=evidence.source_kind if evidence else '')
             return evidence
         evidence_list = cooperative_map(acquire, targets,
             max_workers=max(1, min(3, int(options.get('max_workers', 3)))),
             thread_name_prefix='abstract-enrichment', cancel_event=cancel,
             progress=(lambda current, total: progress('补充论文摘要', current, total)) if progress else None)
         supported = [(paper, evidence) for paper, evidence in zip(targets, evidence_list) if evidence is not None]
-        replacements = {}
+        # Translation may use verified evidence even if optional reranking fails.
+        replacements = {evidence_key(paper.entry): replace(paper, evidence=evidence)
+                        for paper, evidence in supported}
+        refined_count = 0
         batch_size = max(1, min(10, int(config.get('performance', {}).get('ranking_batch_size', 10))))
         total_batches = (len(supported) + batch_size - 1) // batch_size
         if total_batches and progress:
@@ -165,6 +172,7 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
                         key = evidence_key(updated.entry)
                         if key in originals:
                             replacements[key] = updated
+                            refined_count += 1
                             log('web_refinement_completed', paper=key[:12],
                                 initial=originals[key].relevance, final=updated.relevance)
             except Exception as exc:
@@ -172,7 +180,7 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
             if progress:
                 progress('复评论文相关性', batch_index, total_batches)
         log('web_enrichment_finished', selected=len(targets), abstracts=len(supported),
-            refined=len(replacements), elapsed_seconds=round(monotonic() - started, 2))
+            refined=refined_count, elapsed_seconds=round(monotonic() - started, 2))
         return sorted([replacements.get(evidence_key(paper.entry), paper) for paper in papers],
                       key=lambda paper: paper.score, reverse=True)
     finally:

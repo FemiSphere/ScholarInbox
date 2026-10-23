@@ -49,6 +49,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_workers": 3,
         "budget_seconds": 180,
         "retrieval_budget_seconds": 90,
+        "paper_budget_seconds": 20,
+        "max_retries": 0,
         "request_timeout_seconds": 12,
         "cache_enabled": True,
         "cache_path": "data/cache/web_evidence.sqlite3",

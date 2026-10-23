@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from html import unescape
+from html.parser import HTMLParser
 import ipaddress
 import json
 import os
@@ -75,6 +76,9 @@ class WebEvidenceClient:
     _network_slots: BoundedSemaphore = field(default_factory=lambda: BoundedSemaphore(6), init=False, repr=False)
     _request_count: int = field(default=0, init=False)
     _next_request: float = field(default=0, init=False, repr=False)
+
+    _arxiv_slot: BoundedSemaphore = field(default_factory=lambda: BoundedSemaphore(1), init=False, repr=False)
+    _arxiv_next: float = field(default=0, init=False, repr=False)
 
     @property
     def request_count(self) -> int:
@@ -183,6 +187,62 @@ class WebEvidenceClient:
             self._pause(0.5 * (2 ** attempt))
         raise EvidenceUnavailable("network_error")
 
+    def direct_arxiv(self, url: str) -> dict[str, Any]:
+        """Read only the canonical arXiv abstract page, within the shared deadline."""
+        parts = urllib.parse.urlsplit(url)
+        if parts.hostname not in {"arxiv.org", "www.arxiv.org"} or not re.fullmatch(
+                r"/(?:abs|pdf|html)/(?:\d{4}\.\d{4,5}|[A-Za-z.-]+/\d{7})(?:v\d+)?(?:\.pdf)?", parts.path):
+            raise EvidenceUnavailable("invalid_url")
+        target = "https://arxiv.org/abs/" + re.sub(r"\.pdf$", "", parts.path.split("/", 2)[2])
+        while not self._arxiv_slot.acquire(timeout=.05):
+            self._check()
+        try:
+            self._pause(max(0, self._arxiv_next - time.monotonic()))
+            timeout = min(6.0, self.timeout_seconds, self._check())
+            with self._lock:
+                if self._request_count >= self.max_requests:
+                    raise EvidenceUnavailable("request_limit")
+                self._request_count += 1
+            self._arxiv_next = time.monotonic() + 3.0
+        except BaseException:
+            self._arxiv_slot.release()
+            raise
+        results = Queue(maxsize=1)
+        started = time.monotonic()
+        self._event("arxiv_direct_start")
+        def read():
+            status = "ok"
+            try:
+                request = urllib.request.Request(target, headers={"User-Agent": "ScholarInbox/0.2 (abstract reader)"})
+                with urllib.request.urlopen(request, timeout=timeout) as response:
+                    if urllib.parse.urlsplit(response.geturl()).hostname != "arxiv.org":
+                        raise EvidenceUnavailable("invalid_redirect")
+                    raw = response.read(self.max_response_bytes + 1)
+                if len(raw) > self.max_response_bytes:
+                    raise EvidenceUnavailable("response_too_large")
+                parser = _ArxivHTML()
+                parser.feed(raw.decode("utf-8", errors="replace"))
+                results.put(parser.page(target))
+            except Exception as exc:
+                status = exc.code if isinstance(exc, EvidenceUnavailable) else "direct_arxiv_failed"
+                results.put(EvidenceUnavailable(status))
+            finally:
+                self._event("arxiv_direct_end", status=status, elapsed_seconds=round(time.monotonic() - started, 3))
+                self._arxiv_slot.release()
+        Thread(target=read, daemon=True, name="arxiv-abstract").start()
+        stop = time.monotonic() + timeout
+        while True:
+            remaining = min(self._check(), stop - time.monotonic())
+            if remaining <= 0:
+                raise EvidenceUnavailable("timeout")
+            try:
+                result = results.get(timeout=min(.05, remaining))
+                if isinstance(result, Exception):
+                    raise result
+                return result
+            except Empty:
+                continue
+
     def fetch(self, url: str) -> dict[str, Any]:
         if not public_url(url):
             raise EvidenceUnavailable("invalid_url")
@@ -202,6 +262,40 @@ class WebEvidenceClient:
         if not isinstance(results, list):
             raise EvidenceUnavailable("invalid_response")
         return [item for item in results if isinstance(item, dict)][:self.search_count]
+
+
+class _ArxivHTML(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.meta = {}
+        self.depth = 0
+        self.text = []
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "meta":
+            self.meta[attrs.get("name", "")] = attrs.get("content", "")
+        if tag == "blockquote" and "abstract" in attrs.get("class", "").split():
+            self.depth += 1
+
+    def handle_endtag(self, tag):
+        if tag == "blockquote" and self.depth:
+            self.depth -= 1
+
+    def handle_data(self, data):
+        if self.depth:
+            self.text.append(data)
+
+    def page(self, url):
+        identifier = self.meta.get("citation_arxiv_id", "")
+        expected = url.split("/abs/", 1)[-1]
+        if not identifier or identifier != expected and re.sub(r"v\d+$", "", identifier) != expected:
+            raise EvidenceUnavailable("identity_mismatch")
+        abstract = re.sub(r"^\s*Abstract:\s*", "", "".join(self.text)).strip()
+        if len(abstract) < 80 or not self.meta.get("citation_title"):
+            raise EvidenceUnavailable("empty_content")
+        return {"title": self.meta["citation_title"],
+                "content": "arXiv:" + identifier + "\n\n## Abstract\n" + abstract}
 
 
 _PUBLISHERS = (
@@ -431,6 +525,15 @@ def acquire_evidence(entry: Any, client: Any, llm: Any = None, *, max_searches: 
             return None
 
     url = canonical_source_url(str(getattr(entry, "url", "")))
+    direct = getattr(client, "direct_arxiv", None)
+    if direct is not None and urllib.parse.urlsplit(url).hostname in {"arxiv.org", "www.arxiv.org"}:
+        try:
+            evidence = inspect(direct(url), url)
+            if evidence is not None:
+                return evidence
+        except EvidenceUnavailable as exc:
+            if exc.code == "budget_exhausted":
+                raise
     if source_kind(url):
         evidence = fetched(url)
         if evidence is not None:

@@ -303,3 +303,59 @@ def test_known_pmc_repository_is_labeled_honestly_and_structured_abstract_comple
     assert evidence.source_kind == 'repository_abstract'
     assert 'Simulations and measurements' in evidence.abstract
     assert 'Body of the paper' not in evidence.abstract
+
+
+def test_direct_arxiv_metadata_and_abstract():
+    from literature_digest.web_evidence import _ArxivHTML
+    parser = _ArxivHTML()
+    parser.feed(f'<meta name="citation_title" content="{TITLE}"><meta name="citation_arxiv_id" content="2610.23643v2"><blockquote class="abstract mathjax"><span>Abstract:</span> {ABSTRACT}</blockquote>')
+    result = parser.page('https://arxiv.org/abs/2610.23643v2')
+    assert extract_abstract(result['content']) == ABSTRACT
+    with pytest.raises(EvidenceUnavailable):
+        parser.page('https://arxiv.org/abs/2610.23643v1')
+
+
+def test_direct_arxiv_precedes_paid_fetch():
+    class DirectClient(FakeClient):
+        def direct_arxiv(self, url):
+            return page(doi='', abstract=ABSTRACT)
+        def fetch(self, url):
+            raise AssertionError('paid fetch should not run')
+    result = acquire_evidence(paper(doi='', url='https://arxiv.org/abs/2610.23643'), DirectClient())
+    assert result.abstract == ABSTRACT
+
+
+def test_direct_arxiv_request_limit_prevents_network(monkeypatch):
+    monkeypatch.setattr('urllib.request.urlopen', lambda *a, **k: pytest.fail('network attempted'))
+    client = WebEvidenceClient('https://api.deepseek.com', 'KEY', max_requests=0)
+    with pytest.raises(EvidenceUnavailable, match='request_limit'):
+        client.direct_arxiv('https://arxiv.org/abs/2610.23643')
+    assert client.request_count == 0
+
+
+def test_direct_arxiv_failure_uses_fetch():
+    class DirectFailure(FakeClient):
+        def direct_arxiv(self, url):
+            raise EvidenceUnavailable('timeout')
+    client = DirectFailure()
+    client.pages = {'https://arxiv.org/abs/2610.23643': page(doi='')}
+    result = acquire_evidence(paper(doi='', url='https://arxiv.org/abs/2610.23643'), client)
+    assert result and result.abstract == ABSTRACT
+
+
+def test_direct_arxiv_spacing_and_events(monkeypatch):
+    raw = (f'<meta name="citation_title" content="{TITLE}"><meta name="citation_arxiv_id" content="2610.23643"><blockquote class="abstract">Abstract: {ABSTRACT}</blockquote>').encode()
+    class Response(io.BytesIO):
+        def geturl(self):
+            return 'https://arxiv.org/abs/2610.23643'
+    monkeypatch.setattr('urllib.request.urlopen', lambda *a, **k: Response(raw))
+    client = WebEvidenceClient('https://api.deepseek.com', 'KEY')
+    pauses, events = [], []
+    monkeypatch.setattr(client, '_pause', pauses.append)
+    monkeypatch.setattr(client, '_event', lambda name, **fields: events.append((name, fields)))
+    client.direct_arxiv('https://arxiv.org/abs/2610.23643')
+    client.direct_arxiv('https://arxiv.org/abs/2610.23643')
+    assert client.request_count == 2
+    assert 2.5 < pauses[1] <= 3
+    assert [name for name, fields in events].count('arxiv_direct_end') == 2
+    assert all(fields['status'] == 'ok' for name, fields in events if name == 'arxiv_direct_end')
