@@ -18,7 +18,7 @@
 | SQLite 摘要缓存/容量/过期 | `evidence_cache.py:EvidenceCache` | `test_evidence_cache.py` |
 | HTTP 等待、重试、JSON/length、操作模式 | `llm/openai_compatible.py:OpenAICompatibleClient`、`llm/base.py` | `test_api_resilience.py`、`test_api_output_validation.py`、`test_operation_settings.py` |
 | Codex CLI 后端/离线 stub | `llm/codex_cli.py`、`llm/offline_stub.py` | `test_performance.py`、`test_ranking_and_digest.py` |
-| 并发/取消/阶段预算 | `concurrency.py:cooperative_map`、`llm/base.py:llm_time_budget`、`cli.py:main` | `test_api_resilience.py`、`test_performance.py`、`test_enrichment_pipeline.py` |
+| 并发/取消/阶段预算 | `concurrency.py:cooperative_map`、`llm/base.py:llm_time_budget`、`cli.py:main` | `test_concurrency.py`、`test_api_resilience.py`、`test_enrichment_pipeline.py` |
 | HTML/MD、论文详情、图片、来源链接 | `digest.py:write_digests/render_html/_render_paper_card` | `test_digest_outputs.py`、`test_ranking_and_digest.py`、`test_ranking_evidence.py` |
 | 横幅、进度条、OSC 8、纯文本日志 | `ui.py:ProgressReporter` | `test_ui.py` |
 | 请求状态、token/耗时、实时事件 | `telemetry.py:RunMetrics/llm_operation` | `test_live_metrics.py`、`test_performance.py` |
@@ -26,6 +26,8 @@
 共享类型在 `models.py`：`PaperEntry` 是邮件提取数据；`EvidenceRecord` 是独立核验摘要；`RankedPaper` 组合分析/翻译/证据；`DigestRun` 是渲染输入。不要把联网证据塞进邮件原始字段以免改变解析缓存语义。
 
 配置模板：`config.example.yaml` 控制流水线；`config/llm/*.example.yaml` 控制模型与分操作参数。私有文件不在此地图展开。
+
+环境：`environment.yml`、`.python-version`、`requirements.lock`；详见维护指南。
 
 启动：`__main__.py` → `cli.main`；`pyproject.toml` 注册 `scholar-inbox`、`literature-digest`；`scripts/run_digest_macos.sh` 负责环境定位、进程级代理和日志路径。Windows 入口为同目录的 `.ps1`、`.bat`。
 

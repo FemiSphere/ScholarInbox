@@ -27,7 +27,7 @@ DeepSeek 模板仅在相关性分析/复评时开启思考，邮件提取和翻�
 
 ## 安装与配置
 
-需要 Python 3.10+；使用专用环境。
+需要 Python 3.12+；本项目推荐并验证 Python 3.13.18。使用专用环境。
 
 ```bash
 git clone https://github.com/FemiSphere/ScholarInbox.git
@@ -37,6 +37,8 @@ source .venv/bin/activate
 python -m pip install -e ".[dev]"
 cp config.example.yaml config.local.yaml
 ```
+
+也可从仓库根目录执行 `conda env create -f environment.yml` 重建环境；`requirements.lock` 固定本次已验证的 Python 依赖版本。
 
 已有安装使用现有项目环境，无需重复安装。当前 Mac 使用 `literature-digest-mac` Conda 环境；Windows 激活方式及启动入口见 [快捷运行](docs/automation-and-shortcuts.md)。
 

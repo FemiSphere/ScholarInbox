@@ -150,8 +150,8 @@ python -m literature_digest --dry-run --max-emails 50
 macOS 推荐使用独立 conda 环境，避免依赖系统自带 Python，也避免把完整运行环境放在项目目录里：
 
 ```zsh
-conda create -y -n scholar-inbox-mac python=3.11 pip
-conda run -n scholar-inbox-mac python -m pip install -e ".[dev]"
+conda env create -f environment.yml
+conda activate literature-digest-mac
 ```
 
 仓库提供 macOS 启动脚本：

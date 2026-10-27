@@ -203,3 +203,20 @@ def test_expanded_budget_and_search_timeout_are_wired(tmp_path, monkeypatch):
     assert captured['max_requests'] == 80
     assert captured['max_retries'] == 0
     assert DEFAULT_CONFIG['performance']['run_timeout_seconds'] == 900
+
+
+def test_fetch_404_is_not_negative_cached_in_real_acquisition(tmp_path):
+    class UnavailableSource:
+        def __init__(self):
+            self.fetches = 0
+        def search(self, query):
+            return []
+        def fetch(self, url):
+            self.fetches += 1
+            raise EvidenceUnavailable('http_404')
+    client = UnavailableSource()
+    original = [paper('Missing fetch does not prove missing abstract', 'high', .9)]
+    for _ in range(2):
+        assert module.enrich_ranked_papers(original, InterestProfile(), object(), configuration(),
+            base_dir=tmp_path, client=client) == original
+    assert client.fetches == 2

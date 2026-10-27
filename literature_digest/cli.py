@@ -11,7 +11,7 @@ from threading import RLock, Timer
 from collections import Counter
 import re
 
-from .config import load_config
+from .config import load_config, resolve_path as _resolve_path
 from .dedupe import deduplicate_entries
 from .digest import write_digests
 from .email_filter import classify_email
@@ -535,13 +535,6 @@ def _apply_digest_limits(ranked, config: dict[str, Any]):
             irrelevant_count += 1
         result.append(paper)
     return result
-
-
-def _resolve_path(value: str | Path, base_dir: Path) -> Path:
-    path = Path(value)
-    if path.is_absolute():
-        return path
-    return base_dir / path
 
 
 def _shorten(value: str, max_length: int) -> str:

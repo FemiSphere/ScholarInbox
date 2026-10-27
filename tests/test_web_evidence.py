@@ -53,18 +53,18 @@ def test_known_paper_fetch_verifies_identity_and_original_abstract():
     assert evidence.source_url == URL
     assert evidence.source_kind == 'publisher_abstract'
     assert evidence.matched_by == 'doi'
-    assert not client.queries
+    assert client.queries == [DOI]
 
 
 def test_wrong_doi_or_different_paper_is_never_accepted():
     for response in [page(doi='10.9999/other'), page(title='Another research paper with different title')]:
-        assert acquire_evidence(paper(), FakeClient({URL: response})) is None
+        assert acquire_evidence(paper(), FakeClient({URL: response}), max_fetches=1) is None
 
 
 def test_reference_list_doi_does_not_establish_identity():
     unrelated = page(title='A review article about thermal materials', doi='10.9999/review')
     unrelated['content'] += f'\n## References\n{TITLE} DOI: {DOI}'
-    assert acquire_evidence(paper(), FakeClient({URL: unrelated})) is None
+    assert acquire_evidence(paper(), FakeClient({URL: unrelated}), max_fetches=1) is None
 
 
 def test_doi_landing_page_accepts_case_and_encoded_doi_after_title_match():
@@ -78,8 +78,8 @@ def test_doi_landing_page_accepts_case_and_encoded_doi_after_title_match():
 
 def test_search_summary_is_not_an_original_abstract():
     result = {'title': TITLE, 'url': URL, 'summary': ABSTRACT, 'snippet': ABSTRACT}
-    evidence = acquire_evidence(paper(url='', doi=''), FakeClient(results=[result]))
-    assert evidence is None
+    with pytest.raises(EvidenceUnavailable, match='http_404'):
+        acquire_evidence(paper(url='', doi=''), FakeClient(results=[result]))
 
 
 def test_search_content_can_supply_source_abstract_without_duplicate_fetch():
@@ -107,7 +107,7 @@ def test_title_only_search_handles_long_titles_without_exceeding_query_limit():
 
 def test_title_page_without_actual_abstract_or_search_matches_returns_none():
     client = FakeClient({URL: {'title': TITLE, 'content': f'# {TITLE}\nDOI: {DOI}\nSubscribe to access this paper.'}})
-    assert acquire_evidence(paper(), client) is None
+    assert acquire_evidence(paper(), client, max_fetches=1) is None
 
 
 def test_arxiv_abstract_blockquote_and_identity():
@@ -143,7 +143,7 @@ def test_ai_extraction_must_return_exact_source_passage_and_cannot_invent():
     no_heading = {'title': TITLE, 'content': f'# {TITLE}\nDOI: {DOI}\nSource Abstract — {ABSTRACT}'}
     assert acquire_evidence(paper(), FakeClient({URL: no_heading}), Model(ABSTRACT)).abstract == ABSTRACT
     hallucination = 'A wholly invented result. ' * 15
-    assert acquire_evidence(paper(), FakeClient({URL: no_heading}), Model(hallucination)) is None
+    assert acquire_evidence(paper(), FakeClient({URL: no_heading}), Model(hallucination), max_fetches=1) is None
 
 
 def test_transport_failure_propagates_instead_of_becoming_negative_cacheable_none():
@@ -259,7 +259,7 @@ def test_ai_cannot_relabel_unmarked_source_prose_as_an_abstract():
         def complete_json(self, prompt):
             return {'abstract': ABSTRACT}
     content = {'title': TITLE, 'content': f'# {TITLE}\nDOI: {DOI}\nIntroduction\n{ABSTRACT}'}
-    assert acquire_evidence(paper(), FakeClient({URL: content}), Model()) is None
+    assert acquire_evidence(paper(), FakeClient({URL: content}), Model(), max_fetches=1) is None
 
 
 def test_arxiv_explicit_version_conflict_and_wrong_metadata_id_rejected():
@@ -410,7 +410,7 @@ def test_search_source_content_is_used_before_slow_doi_redirect():
     client = FakeClient(results=[response])
     result = acquire_evidence(paper(), client)
     assert result.abstract == ABSTRACT
-    assert client.fetches == [URL]
+    assert client.fetches == []
     assert client.queries == [DOI.lower()]
 
 
@@ -420,4 +420,63 @@ def test_all_search_content_checked_before_fetching_first_candidate():
     client = FakeClient(results=[{'url': first}, dict(page(), url=second)])
     result = acquire_evidence(paper(), client)
     assert result.abstract == ABSTRACT
+    assert client.fetches == []
+
+
+@pytest.mark.parametrize('code', ['http_403', 'http_404', 'empty_content', 'invalid_url'])
+def test_acquisition_failures_are_not_negative_cacheable(code):
+    client = FakeClient({URL: EvidenceUnavailable(code)})
+    with pytest.raises(EvidenceUnavailable, match=code):
+        acquire_evidence(paper(doi=''), client)
+
+
+def test_search_transient_failure_still_fetches_original_source():
+    client = FakeClient({URL: page()}, results=EvidenceUnavailable('timeout'))
+    assert acquire_evidence(paper(), client).abstract == ABSTRACT
     assert client.fetches == [URL]
+
+
+def test_search_failure_with_verified_page_without_abstract_still_raises():
+    client = FakeClient({URL: page(abstract='')}, results=EvidenceUnavailable('timeout'))
+    with pytest.raises(EvidenceUnavailable, match='timeout'):
+        acquire_evidence(paper(doi=''), client)
+
+
+@pytest.mark.parametrize('code', ['http_401', 'http_402', 'missing_key', 'budget_exhausted', 'request_limit'])
+def test_search_terminal_failures_do_not_spend_fetch_budget(code):
+    client = FakeClient({URL: page()}, results=EvidenceUnavailable(code))
+    with pytest.raises(EvidenceUnavailable, match=code):
+        acquire_evidence(paper(), client)
+    assert client.fetches == []
+
+
+def test_fetch_only_mode_skips_search_and_keeps_fetch_limit():
+    client = FakeClient({URL: page()})
+    assert acquire_evidence(paper(), client, max_searches=0, max_fetches=1).abstract == ABSTRACT
+    assert client.queries == []
+    assert client.fetches == [URL]
+
+
+def test_invalid_original_url_is_a_failure_even_without_fetch():
+    client = FakeClient()
+    with pytest.raises(EvidenceUnavailable, match='invalid_url'):
+        acquire_evidence(paper(url='http://localhost/paper', doi=''), client)
+    assert client.fetches == []
+
+
+def test_direct_arxiv_budget_failure_does_not_fall_through():
+    class DirectFailure(FakeClient):
+        def direct_arxiv(self, url):
+            raise EvidenceUnavailable('request_limit')
+    client = DirectFailure()
+    with pytest.raises(EvidenceUnavailable, match='request_limit'):
+        acquire_evidence(paper(doi='', url='https://arxiv.org/abs/2610.23643'), client)
+    assert client.fetches == client.queries == []
+
+
+def test_failed_candidates_never_exceed_fetch_limit():
+    client = FakeClient(results=[{'url': 'https://nature.com/articles/a'}, {'url': URL}])
+    with pytest.raises(EvidenceUnavailable, match='http_404'):
+        acquire_evidence(paper(), client, max_fetches=2)
+    assert len(client.fetches) == 2
+    assert len(client.queries) == 1

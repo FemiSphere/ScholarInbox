@@ -9,12 +9,16 @@ from time import monotonic
 from typing import Callable
 
 from .concurrency import cooperative_map
+from .config import DEFAULT_CONFIG
 from .dedupe import normalize_doi, normalize_title, canonicalize_url
 from .evidence_cache import EvidenceCache, CacheError
 from .llm.base import llm_time_budget
 from .models import EvidenceRecord, RankedPaper
 from .ranking import rank_papers
 from .web_evidence import WebEvidenceClient, acquire_evidence
+
+
+_NEGATIVE_CACHE_POLICY = 4
 
 
 class _OptionalTaskCancel(Event):
@@ -57,14 +61,14 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
                          detail: Callable[[str], None] | None = None,
                          client=None) -> list[RankedPaper]:
     """Keep original results on optional failure; only verified abstracts reach reranking."""
-    options = config.get('web_enrichment', {})
+    options = {**DEFAULT_CONFIG['web_enrichment'], **config.get('web_enrichment', {})}
     targets = [paper for paper in papers if paper.relevance in {'high', 'medium'}]
     targets.sort(key=lambda paper: (paper.relevance != 'high', -paper.score))
-    targets = targets[:max(0, int(options.get('max_papers', 30)))]
+    targets = targets[:max(0, int(options['max_papers']))]
     if not targets:
         return papers
     started = monotonic()
-    deadline = started + max(0.0, float(options.get('budget_seconds', 480)))
+    deadline = started + max(0.0, float(options['budget_seconds']))
     cancel = cancel_event if cancel_event is not None else Event()
     def log(event, **fields):
         if metrics is not None:
@@ -78,26 +82,26 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
     client = client or WebEvidenceClient(
         base_url='https://api.deepseek.com', api_key_env=api.get('api_key_env', 'DEEPSEEK_API_KEY'),
         metrics=metrics, cancel_event=cancel,
-        timeout_seconds=float(options.get('request_timeout_seconds', 40)),
-        search_timeout_seconds=float(options.get('search_timeout_seconds', 12)),
-        budget_seconds=min(float(options.get('retrieval_budget_seconds', 360)), max(0, deadline - monotonic())),
-        max_requests=int(options.get('max_requests', 80)),
+        timeout_seconds=float(options['request_timeout_seconds']),
+        search_timeout_seconds=float(options['search_timeout_seconds']),
+        budget_seconds=min(float(options['retrieval_budget_seconds']), max(0, deadline - monotonic())),
+        max_requests=int(options['max_requests']),
         search_count=3, min_interval_seconds=0.5,
-        max_retries=max(0, int(options.get("max_retries", 0))),
+        max_retries=max(0, int(options['max_retries'])),
     )
     cache = None
-    if options.get('cache_enabled', True):
-        path = Path(options.get('cache_path', 'data/cache/web_evidence.sqlite3'))
+    if options['cache_enabled']:
+        path = Path(options['cache_path'])
         if not path.is_absolute():
             path = base_dir / path
         try:
             cache = EvidenceCache(path,
-                max_entries=int(options.get('cache_max_entries', 300)),
-                max_bytes=int(options.get('cache_max_bytes', 8 * 1024 * 1024)),
-                ttl_days=float(options.get('cache_ttl_days', 30)), negative_ttl_hours=6)
+                max_entries=int(options['cache_max_entries']),
+                max_bytes=int(options['cache_max_bytes']),
+                ttl_days=float(options['cache_ttl_days']), negative_ttl_hours=6)
         except (CacheError, OSError, ValueError):
             log('web_cache_unavailable')
-    log('web_enrichment_started', candidates=len(targets), budget_seconds=options.get('budget_seconds', 480))
+    log('web_enrichment_started', candidates=len(targets), budget_seconds=options['budget_seconds'])
     try:
         if progress:
             progress('补充论文摘要', 0, len(targets))
@@ -113,12 +117,12 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
                     if evidence is not None:
                         log('web_cache_hit', paper=key[:12])
                         return evidence
-                    if isinstance(record, dict) and record.get('status') == 'missing' and record.get('policy') == 3:
+                    if isinstance(record, dict) and record.get('status') == 'missing' and record.get('policy') == _NEGATIVE_CACHE_POLICY:
                         return None
                 except (CacheError, OSError):
                     log('web_cache_read_failed')
             try:
-                with llm_time_budget(min(float(options.get("paper_budget_seconds", 60)),
+                with llm_time_budget(min(float(options['paper_budget_seconds']),
                                          max(0, deadline - monotonic()))):
                     evidence = acquire_evidence(paper.entry, client, llm)
             except Exception as exc:
@@ -133,14 +137,14 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
             if cache is not None:
                 try:
                     cache.put(key, {'status': 'verified', 'evidence': asdict(evidence)} if evidence else
-                              {'status': 'missing', 'policy': 3}, negative=evidence is None)
+                              {'status': 'missing', 'policy': _NEGATIVE_CACHE_POLICY}, negative=evidence is None)
                 except (CacheError, OSError):
                     log('web_cache_write_failed')
             log('web_evidence_result', paper=key[:12], status='verified' if evidence else 'not_found',
                 source=evidence.source_kind if evidence else '')
             return evidence
         evidence_list = cooperative_map(acquire, targets,
-            max_workers=max(1, min(3, int(options.get('max_workers', 3)))),
+            max_workers=max(1, min(3, int(options['max_workers']))),
             thread_name_prefix='abstract-enrichment', cancel_event=cancel,
             progress=(lambda current, total: progress('补充论文摘要', current, total)) if progress else None)
         supported = [(paper, evidence) for paper, evidence in zip(targets, evidence_list) if evidence is not None]

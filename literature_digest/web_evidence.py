@@ -520,59 +520,68 @@ def acquire_evidence(entry: Any, client: Any, llm: Any = None, *, max_searches: 
         return EvidenceRecord(abstract=abstract, source_url=url, source_kind=kind,
             fetched_at=datetime.now(timezone.utc).isoformat(), matched_by=identity[0], identity=identity[1])
 
+    def remember_failure(exc: EvidenceUnavailable):
+        nonlocal last_failure
+        if exc.code in {"http_400", "http_401", "http_402", "missing_key",
+                        "budget_exhausted", "request_limit", "cancelled"}:
+            raise exc
+        if last_failure is None:
+            last_failure = exc
+
     def fetched(url: str):
-        nonlocal fetches, last_failure
+        nonlocal fetches
         if url in seen or fetches >= max_fetches or source_kind(url) is None:
             return None
         seen.add(url)
         fetches += 1
         try:
-            return inspect(client.fetch(url), url)
+            response = client.fetch(url)
         except EvidenceUnavailable as exc:
-            if exc.code in {"http_400", "http_401", "http_402", "missing_key", "budget_exhausted", "request_limit", "cancelled"}:
-                raise
-            if exc.code not in {"http_403", "http_404", "empty_content", "invalid_url"}:
-                last_failure = exc
+            remember_failure(exc)
             return None
+        return inspect(response, url)
 
     url = canonical_source_url(str(getattr(entry, "url", "")))
+    if url and not public_url(url):
+        remember_failure(EvidenceUnavailable("invalid_url"))
     direct = getattr(client, "direct_arxiv", None)
-    if direct is not None and urllib.parse.urlsplit(url).hostname in {"arxiv.org", "www.arxiv.org"}:
+    is_arxiv = source_kind(url) == "preprint_abstract" and urllib.parse.urlsplit(url).hostname in {"arxiv.org", "www.arxiv.org"}
+    if direct is not None and is_arxiv:
         try:
-            evidence = inspect(direct(url), url)
+            response = direct(url)
+        except EvidenceUnavailable as exc:
+            remember_failure(exc)
+        else:
+            evidence = inspect(response, url)
             if evidence is not None:
                 return evidence
-        except EvidenceUnavailable as exc:
-            if exc.code == "budget_exhausted":
-                raise
-    if source_kind(url):
+    # Preserve the direct arXiv /abs/ path before paid discovery.
+    if is_arxiv:
         evidence = fetched(url)
         if evidence is not None:
             return evidence
+
     doi = _doi_key(getattr(entry, "doi", ""))
-    if max_searches <= 0:
-        if doi:
-            evidence = fetched("https://doi.org/" + doi)
-            if evidence is not None:
-                return evidence
-        if last_failure is not None:
-            raise last_failure
-        return None
-    query = doi or ('"' + _plain(entry.title)[:126] + '"')
-    try:
-        results = client.search(query)
-    except EvidenceUnavailable:
-        raise
     pending_urls = []
-    # Inspect all supplied source content before spending another slow Fetch.
-    for result in results:
-        target = canonical_source_url(str(result.get("url", "")))
-        if source_kind(target) is None:
-            continue
-        evidence = inspect(result, target) if isinstance(result.get("content"), str) and result["content"].strip() else None
-        if evidence is not None:
-            return evidence
-        pending_urls.append(target)
+    if max_searches > 0:
+        query = doi or ('"' + _plain(entry.title)[:126] + '"')
+        try:
+            results = client.search(query)
+        except EvidenceUnavailable as exc:
+            remember_failure(exc)
+        else:
+            # Search content is source text; summaries/snippets remain hints.
+            # Inspect every result before any candidate Fetch consumes budget.
+            for result in results:
+                target = canonical_source_url(str(result.get("url", "")))
+                if source_kind(target) is None:
+                    continue
+                evidence = inspect(result, target)
+                if evidence is not None:
+                    return evidence
+                pending_urls.append(target)
+    # Search failure still permits a bounded attempt at the original source.
+    pending_urls.insert(0, url)
     if doi:
         pending_urls.append("https://doi.org/" + doi)
     for target in pending_urls:

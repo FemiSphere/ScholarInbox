@@ -76,19 +76,20 @@ else
 fi
 
 if [[ -z "$PYTHON" ]]; then
-  printf 'Error: ScholarInbox requires Python 3.10 or newer, but no Python interpreter was found.\n' \
+  printf 'Error: ScholarInbox requires Python 3.12 or newer, but no Python interpreter was found.\n' \
     | tee -a "$LOG_FILE" >&2
   exit 2
 fi
 
-if ! "$PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
+if ! "$PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)'; then
   PYTHON_VERSION="$("$PYTHON" --version 2>&1 || true)"
-  printf 'Error: ScholarInbox requires Python 3.10 or newer; detected %s at %s.\n' \
+  printf 'Error: ScholarInbox requires Python 3.12 or newer; detected %s at %s.\n' \
     "$PYTHON_VERSION" "$PYTHON" | tee -a "$LOG_FILE" >&2
   exit 2
 fi
 
 printf 'Python interpreter: %s\n' "$PYTHON" >> "$LOG_FILE"
+"$PYTHON" --version >> "$LOG_FILE" 2>&1
 
 set +e
 "$PYTHON" -m literature_digest "$@" 2> >(tee -a "$LOG_FILE" >&2)

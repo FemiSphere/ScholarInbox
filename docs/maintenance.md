@@ -12,6 +12,8 @@ python -B -m pytest -q
 python -B -m literature_digest --sample --dry-run --quiet --no-color
 ```
 
+当前 Mac 专用环境已从 Python 3.11.15 升级为 3.13.18，Google SDK 的旧 Python 支持预警不再通过屏蔽 warnings 处理。项目最低要求为 3.12；`.python-version` 与 `environment.yml` 记录推荐解释器，`requirements.lock` 固定本次验证的依赖。依赖升级应独立评估，不借解释器升级一起无约束更新。
+
 当前 Mac 也可直接使用 `/opt/homebrew/Caskroom/miniforge/base/envs/literature-digest-mac/bin/python`。其他机器按 README 建项目环境，不在 base 临时安装依赖。macOS 启动脚本会定位环境并切到项目根目录。
 
 代码改动先跑相关测试，完成后再全量；渲染/编排变化检查新 MD/HTML。测试产物优先用 `TemporaryDirectory`；需要真实启动时给独立 `--date` 标签，确认后只清理自己产生的测试产物。不要覆盖真实日报。
@@ -64,6 +66,14 @@ rg -n '回退|timeout|output_length|budget|web_|evidence_' logs/digest-指定运
 | `*.egg-info/` | editable 安装元数据 | 已忽略；不当临时日志删除，可能影响安装元数据查询 |
 
 Search/Fetch 原始页面、清洗内容和搜索响应只存内存，不落逐篇文件。临时 SQLite 事务在异常/取消时关闭；无法识别的数据库不会被自动删除。不要为“目录干净”清掉已有缓存/索引、图片或用户文件。
+
+## 2026-10-27 维护记录
+
+代码起点 `0b7c86c`，修改前标签 `checkpoint-before-python-upgrade-20261027`。升级前 Conda 显式包清单、revision 和 portable pip 版本记录保留在本地 `data/environment_backups/20261027-python313/`；不包含项目 OAuth/API 凭据。Conda revision 只回滚 Conda 包，不能单独还原 pip 包，恢复时须同时使用该目录依赖记录。当前运行仍使用同名 `literature-digest-mac` 环境，base 未修改。
+
+近两次已完成运行：10/26 核验摘要 1/25、Fetch 44/46 返回404；10/27 核验摘要 7/19、Fetch 12/20 返回404，4次arXiv直取全部成功；Search均成功。今天一次邮件提取超时已重试恢复，无最终核心回退，不为此继续扩大等待。
+
+本次改为非arXiv优先Search的原始content，再按限制Fetch。任何未恢复的获取失败保留明确错误，不缓存成“没有摘要”；负缓存策略更新，已有成功摘要可复用。并发任务复制调用方上下文以继承预算；后台线程启动失败释放已占用网络名额。只有离线回归与本地输出验证，本次未重跑真实邮箱/付费API，不能据此声称获取成功率已进一步提高。
 
 ## 文档如何保持简洁
 

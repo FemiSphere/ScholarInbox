@@ -228,3 +228,20 @@ def test_keepalive_before_json_is_logged_without_body(client, monkeypatch, tmp_p
     assert any(r['event'] == 'llm_response_headers' and r['http_status'] == 200 for r in records)
     assert any(r['event'] == 'llm_server_keepalive' for r in records)
     assert 'private prompt' not in journal.read_text()
+
+
+def test_failed_worker_start_releases_network_capacity(client, monkeypatch):
+    def cannot_start(*args, **kwargs):
+        raise RuntimeError('thread unavailable')
+    monkeypatch.setattr('threading.Thread.start', cannot_start)
+    with pytest.raises(LLMError) as error:
+        client.complete_json('private prompt')
+    assert error.value.code == 'insufficient_system_resource'
+    slots = []
+    try:
+        while client._network_slots.acquire(blocking=False):
+            slots.append(1)
+        assert len(slots) == 8
+    finally:
+        for _ in slots:
+            client._network_slots.release()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+from contextvars import copy_context
 from threading import Event
 from typing import Callable, Iterable, TypeVar
 
@@ -32,7 +33,7 @@ def cooperative_map(
                     progress(index + 1, len(values))
         else:
             executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix=thread_name_prefix)
-            pending = {executor.submit(checked_work, item): index for index, item in enumerate(values)}
+            pending = {executor.submit(copy_context().run, checked_work, item): index for index, item in enumerate(values)}
             while pending:
                 if cancel.is_set():
                     raise KeyboardInterrupt

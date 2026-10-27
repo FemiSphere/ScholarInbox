@@ -1,0 +1,9 @@
+name: literature-digest-mac
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.13.18,<3.14
+  - pip
+  - pip:
+      - -r requirements.lock
+      - -e .[dev]

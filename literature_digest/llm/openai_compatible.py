@@ -221,7 +221,11 @@ class OpenAICompatibleClient:
             finally:
                 self._network_slots.release()
 
-        Thread(target=fetch, name="llm-http", daemon=True).start()
+        try:
+            Thread(target=fetch, name="llm-http", daemon=True).start()
+        except (RuntimeError, OSError) as exc:
+            self._network_slots.release()
+            raise LLMError("Cannot start an API worker", code="insufficient_system_resource") from exc
         while True:
             self._check_cancelled()
             remaining = expires - perf_counter()
