@@ -38,7 +38,7 @@ python -m pip install -e ".[dev]"
 cp config.example.yaml config.local.yaml
 ```
 
-也可从仓库根目录执行 `conda env create -f environment.yml` 重建环境；`requirements.lock` 固定本次已验证的 Python 依赖版本。
+在需要新建环境时，也可从仓库根目录执行 `conda env create -f environment.yml`；该文件使用环境名 `literature-digest-mac`，已有同名环境时不能直接创建。`requirements.lock` 记录本次在 macOS ARM64、Python 3.13.18 上验证的依赖版本；其他平台仍需自行验证。
 
 已有安装使用现有项目环境，无需重复安装。当前 Mac 使用 `literature-digest-mac` Conda 环境；Windows 激活方式及启动入口见 [快捷运行](docs/automation-and-shortcuts.md)。
 
