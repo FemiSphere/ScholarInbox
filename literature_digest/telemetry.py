@@ -175,7 +175,7 @@ class RunMetrics:
                         f"cache_hit_tokens={item.cache_hit_tokens or 'n/a'}"
                     )
         if validation_failures:
-            lines.append(f"LLM JSON validation: invalid_attempts={len(validation_failures)} (includes repaired responses)")
+            lines.append(f"LLM output validation: invalid_attempts={len(validation_failures)} (includes repaired responses)")
             if include_request_details:
                 for failure in validation_failures:
                     lines.append(f"  operation={failure['operation']}, code={failure['code']}")

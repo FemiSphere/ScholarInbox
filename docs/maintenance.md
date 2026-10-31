@@ -24,9 +24,10 @@ sample 完全离线；真实 `--dry-run --max-emails N` 会读取 Gmail、可能
 
 1. 用文件修改时间选择最新 1–2 个 `logs/digest-*.log`，先看开始/完成、最后阶段和核心回退原因。
 2. 对应 `logs/metrics/requests-*.jsonl` 看请求开始/结束、operation、状态与重试；`metrics-*.log` 为结束汇总。以时间线关联同次运行，不能只认相邻文件名。
-3. 解析慢看 `email_extraction`、chunk/递归/缓存命中；排序慢看 `paper_ranking`；翻译慢看 `paper_translation`；联网补充看 `evidence_request_*`、`web_*`。
-4. 比较墙钟时间、请求重试、输出 token 和预算；并发请求耗时求和可能大于总运行时间。
-5. 只读相关模块与定向测试。没有证据时不更换 key、不扩大超时、不关闭科学判断保护。
+3. 翻译 `invalid_schema` 先查请求指标中的 `translation_item_recovery`，定位 index、failed_fields 及最终是否恢复；原请求 `status=ok/stop` 不代表字段校验通过。
+4. 解析慢看 `email_extraction`、chunk/递归/缓存命中；排序慢看 `paper_ranking`；翻译慢看 `paper_translation`；联网补充看 `evidence_request_*`、`web_*`。
+5. 比较墙钟时间、请求重试、输出 token 和预算；并发请求耗时求和可能大于总运行时间。
+6. 只读相关模块与定向测试。没有证据时不更换 key、不扩大超时、不关闭科学判断保护。
 
 示例（将文件名替换为已选定的一次运行）：
 
