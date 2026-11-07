@@ -66,6 +66,8 @@ python -m literature_digest --no-dry-run
 
 日报默认只输出 HTML。若同时需要 Markdown，在 `config.local.yaml` 的 `digest` 下设置 `output_formats: ["html", "md"]`。
 
+在 `digest` 下设置 `cleanup_old_outputs: true`，可在正式运行成功后清理超过 60 天的日报。清理按文件名日期判断，同时适用于 Markdown 和 HTML。
+
 日报在 `outputs/`，日志在 `logs/`，请求指标在 `logs/metrics/`，本地索引/缓存/图片在 `data/`。这些目录被 Git 忽略。不要因清理中间文件而删除用户日报、索引、图片和历史诊断证据。
 
 macOS 一键入口：

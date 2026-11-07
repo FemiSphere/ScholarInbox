@@ -94,6 +94,8 @@ digest:
   output_dir: "outputs"
   # 默认只输出 HTML。需要 Markdown 时改为 ["html", "md"]。
   output_formats: ["html"]
+  # 正式运行成功后，按文件名日期删除超过 60 天的 MD/HTML 日报。
+  cleanup_old_outputs: false
   # false 时，同一天多次运行不会覆盖已有 digest，而是自动追加 -2、-3。
   overwrite_existing: false
   include_low_relevance: true

@@ -137,3 +137,23 @@ def test_irrelevant_items_have_a_default_collapsed_html_section(tmp_path):
     assert '<details class="paper-section irrelevant-section" data-section-level="irrelevant" open>' not in html
     assert 'data-level="irrelevant"' in html
     assert "activeFilter === 'irrelevant' || query" in html
+
+
+def test_prune_old_digests_only_removes_expired_reports(tmp_path):
+    from datetime import date
+    from literature_digest.digest import prune_old_digests
+
+    expired = ['2026-01-01-digest.md', '2026-01-01-digest-2.html']
+    retained = ['2026-01-02-digest.html', '2026-02-30-digest.html',
+                '2026-01-01-notes.md', '2026-01-01-digest-copy.html',
+                '2025-12-31-digest.html']
+    for name in expired + retained:
+        (tmp_path / name).touch()
+    link = tmp_path / '2026-01-01-digest-3.html'
+    link.symlink_to(tmp_path / retained[-1])
+
+    assert prune_old_digests(tmp_path, today=date(2026, 3, 3),
+                             protected=[tmp_path / retained[-1]]) == (2, [])
+    assert all(not (tmp_path / name).exists() for name in expired)
+    assert all((tmp_path / name).exists() for name in retained)
+    assert link.is_symlink()

@@ -13,7 +13,7 @@ import re
 
 from .config import load_config, resolve_path as _resolve_path
 from .dedupe import deduplicate_entries
-from .digest import write_digests
+from .digest import prune_old_digests, write_digests
 from .email_filter import classify_email
 from .env import load_dotenv_file
 from .gmail_client import GmailConnectionError, GmailClient
@@ -401,9 +401,10 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
     if metrics.cancel_event.is_set():
         raise KeyboardInterrupt
     progress.step("保存文献日报")
+    output_dir = _resolve_path(config["digest"]["output_dir"], base_dir)
     output_paths = write_digests(
         run,
-        _resolve_path(config["digest"]["output_dir"], base_dir),
+        output_dir,
         formats=list(config["digest"]["output_formats"]),
         overwrite_existing=bool(config["digest"].get("overwrite_existing", True)),
     )
@@ -427,6 +428,18 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             progress.error(f"Error: {exc}")
             progress.close()
             return 2
+
+    if (output_paths and config["digest"].get("cleanup_old_outputs", False)
+            and not dry_run and not sample_mode and not fallback_count
+            and not metrics.cancel_event.is_set()):
+        try:
+            removed, failed = prune_old_digests(output_dir, today=date.today(), protected=output_paths)
+        except OSError as exc:
+            progress.detail(f"无法扫描日报输出目录：{type(exc).__name__}")
+        else:
+            progress.detail(f"已清理超过 60 天的日报：{removed} 个")
+            for name in failed:
+                progress.detail(f"无法清理旧日报：{name}")
 
     progress.done("文献日报已生成")
     progress.output(

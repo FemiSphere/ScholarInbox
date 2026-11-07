@@ -205,3 +205,25 @@ def test_degraded_api_run_preserves_unread_emails_and_registry(tmp_path, monkeyp
     log = next((tmp_path / "logs").glob("digest-*.log")).read_text()
     assert "LLM 失败（LLMError，code=output_length）" in log
     assert "LLM 失败（LLMError，code=output_length）" not in output
+
+
+def test_old_outputs_are_pruned_only_after_enabled_formal_run(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    config_path = _write_config(tmp_path)
+    _patch_external_clients(monkeypatch)
+    outputs = tmp_path / 'outputs'
+    outputs.mkdir()
+    old = outputs / '2020-01-01-digest.html'
+    old.touch()
+    args = ['--config', config_path, '--date', '2020-01-02', '--quiet']
+
+    assert cli.main([*args, '--no-dry-run']) == 0
+    assert old.exists()
+    config = json.loads((tmp_path / 'config.json').read_text())
+    config['digest']['cleanup_old_outputs'] = True
+    (tmp_path / 'config.json').write_text(json.dumps(config))
+    assert cli.main([*args, '--dry-run']) == 0
+    assert old.exists()
+    assert cli.main([*args, '--no-dry-run']) == 0
+    assert not old.exists()
+    assert (outputs / '2020-01-02-digest.md').exists()

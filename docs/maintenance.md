@@ -55,7 +55,7 @@ rg -n '回退|timeout|output_length|budget|web_|evidence_' logs/digest-指定运
 | `research_interests.md` | 用户维护的当前科研兴趣 | 不是缓存；不要自动改写研究方向 |
 | `docs/`、`docs/history/` | 当前导航/机制、历史证据 | 按任务读取，不批量载入历史 |
 | `examples/` | 公开阅读页示例 | 与私有 outputs 区分 |
-| `outputs/` | 用户日报及人工保留输出 | 非临时文件；不批量移动/删除 |
+| `outputs/` | MD/HTML 日报 | 默认长期保留。开启 `digest.cleanup_old_outputs` 后，正式成功运行仅清理文件名日期早于当天减 60 天的日报，保留本次输出。 |
 | `logs/`、`logs/metrics/` | 诊断证据 | 本次不自动轮转；需另行约定保留期 |
 | `data/paper_registry.json` | 近 30 天去重身份 | 不当作缓存清除；丢失会影响重复处理 |
 | `data/cache/email_parsing/` | 成功邮件提取缓存 | 本地私有；当前没有全局容量回收，不宣称自动清完 |

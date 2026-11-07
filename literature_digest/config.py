@@ -98,6 +98,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "digest": {
         "output_dir": "outputs",
         "output_formats": ["html"],
+        "cleanup_old_outputs": False,
         "include_low_relevance": True,
         "include_irrelevant": True,
         "language": "zh-CN",

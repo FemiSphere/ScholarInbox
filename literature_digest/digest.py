@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+from datetime import date, timedelta
 from html import escape
 from pathlib import Path
 from urllib.parse import quote, urlsplit
@@ -46,6 +48,38 @@ def write_digests(
         written.append(html_path)
 
     return written
+
+
+_DIGEST_FILENAME = re.compile(r"([0-9]{4}-[0-9]{2}-[0-9]{2})-digest(?:-[0-9]+)?\.(?:md|html)")
+
+
+def prune_old_digests(
+    output_dir: Path, *, today: date, protected: list[Path],
+) -> tuple[int, list[str]]:
+    """Remove dated reports older than 60 days, excluding the current run's files."""
+    cutoff = today - timedelta(days=60)
+    current_outputs = set(protected)
+    removed = 0
+    failed = []
+    for path in output_dir.iterdir():
+        match = _DIGEST_FILENAME.fullmatch(path.name)
+        if match is None or path in current_outputs or path.is_symlink() or not path.is_file():
+            continue
+        try:
+            report_date = date.fromisoformat(match[1])
+        except ValueError:
+            continue
+        if report_date >= cutoff:
+            continue
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            failed.append(path.name)
+        else:
+            removed += 1
+    return removed, failed
 
 
 def render_markdown(run: DigestRun) -> str:
