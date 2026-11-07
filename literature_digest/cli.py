@@ -404,7 +404,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
     output_paths = write_digests(
         run,
         _resolve_path(config["digest"]["output_dir"], base_dir),
-        formats=list(config["digest"].get("output_formats", ["md", "html"])),
+        formats=list(config["digest"]["output_formats"]),
         overwrite_existing=bool(config["digest"].get("overwrite_existing", True)),
     )
 

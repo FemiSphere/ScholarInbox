@@ -92,9 +92,8 @@ deduplication:
 
 digest:
   output_dir: "outputs"
-  output_formats:
-    - "md"
-    - "html"
+  # 默认只输出 HTML。需要 Markdown 时改为 ["html", "md"]。
+  output_formats: ["html"]
   # false 时，同一天多次运行不会覆盖已有 digest，而是自动追加 -2、-3。
   overwrite_existing: false
   include_low_relevance: true

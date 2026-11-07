@@ -131,7 +131,7 @@ def test_cli_optional_enrichment_failure_still_finishes_and_marks_processed(tmp_
     assert calls==[1]
     assert marked
     assert (tmp_path/'data/paper_registry.json').exists()
-    rendered=(tmp_path/'outputs/2026-10-22-digest.md').read_text()
+    rendered=(tmp_path/'outputs/2026-10-22-digest.html').read_text()
     assert '本次 1 项 LLM 任务失败' not in rendered
     assert '中文摘要' in rendered
 

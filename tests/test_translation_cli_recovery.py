@@ -39,5 +39,6 @@ def test_recovered_translation_can_complete_normal_processing(tmp_path, monkeypa
     assert calls and calls[-1] == 1 and len(calls) == 2
     assert marked
     assert (tmp_path/'data/paper_registry.json').exists()
-    output=(tmp_path/'outputs/2026-10-31-digest.md').read_text()
+    assert not list((tmp_path/'outputs').glob('*.md'))
+    output=(tmp_path/'outputs/2026-10-31-digest.html').read_text()
     assert '项 LLM 任务失败' not in output

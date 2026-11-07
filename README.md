@@ -4,7 +4,7 @@
 
 **把学术提醒邮件，整理成可快速筛选的个性化文献日报。**
 
-Gmail · Google Scholar / 期刊周报 · DeepSeek / Codex CLI · Markdown + HTML
+Gmail · Google Scholar / 期刊周报 · DeepSeek / Codex CLI · HTML · 可选 Markdown
 
 [在线示例](https://htmlpreview.github.io/?https://github.com/FemiSphere/ScholarInbox/blob/master/examples/2026-04-30-digest.html) · [文档入口](docs/README.md) · [维护地图](docs/code-map.md)
 
@@ -17,7 +17,7 @@ Gmail · Google Scholar / 期刊周报 · DeepSeek / Codex CLI · Markdown + HTM
 ```text
 邮件读取/过滤 → 条目提取/长邮件分块 → 批内与跨日期去重
   → 按研究兴趣初筛 → 可选原始摘要补充与复评
-  → 中文标题/概述 → MD + 可搜索、筛选的 HTML
+  → 中文标题/概述 → 可搜索、筛选的 HTML
   → 核心成功后，按配置标记邮件已读
 ```
 
@@ -64,6 +64,8 @@ python -m literature_digest --no-dry-run
 
 只有正式运行、`gmail.mark_as_read: true` 且核心任务无回退，才会标记已处理邮件为已读；不删除邮件。核心任务回退时仍可能生成可读 HTML，但会提示不完整，并保留未读和去重索引状态。可选联网失败保留初筛结果，不按核心失败处理。
 
+日报默认只输出 HTML。若同时需要 Markdown，在 `config.local.yaml` 的 `digest` 下设置 `output_formats: ["html", "md"]`。
+
 日报在 `outputs/`，日志在 `logs/`，请求指标在 `logs/metrics/`，本地索引/缓存/图片在 `data/`。这些目录被 Git 忽略。不要因清理中间文件而删除用户日报、索引、图片和历史诊断证据。
 
 macOS 一键入口：
@@ -95,6 +97,6 @@ examples/                公开阅读页示例
 
 ## 验证与边界
 
-在项目环境运行 `python -B -m pytest -q`；编排/渲染变化再跑离线 sample，检查 MD/HTML。纯文档调整只检查链接、代码路径、参数一致性及 diff。
+在项目环境运行 `python -B -m pytest -q`；编排/渲染变化再跑离线 sample，检查配置所选的输出格式。纯文档调整只检查链接、代码路径、参数一致性及 diff。
 
 邮件模板、站点访问与 API 可用性仍影响提取和摘要覆盖率。数据不足会保留限定表述；新增摘要及思考模式是否改善推荐准确率，需要人工标注评估。现有缓存与日志的保留规则见 [维护指南](docs/maintenance.md#目录与清理)。
