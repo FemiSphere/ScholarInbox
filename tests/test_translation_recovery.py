@@ -80,17 +80,18 @@ def test_system_failure_is_not_repeated_per_entry(code):
     assert len(client.calls) == 1
 
 
-def test_partial_error_retains_success_and_does_not_repeat_bad_repair():
+def test_partial_error_retains_success_and_stops_after_compact_repair():
     bad = row(21)
     bad["title_zh"] = {"bad": "type"}
-    client = Client([{"papers": [row(20), bad]}, {"papers": [bad]}])
+    client = Client([{"papers": [row(20), bad]}, {"papers": [bad]}, {"papers": [bad]}])
     events = []
     client.metrics.event_callback = lambda name, fields: events.append((name, fields))
     with pytest.raises(TranslationRecoveryError) as caught:
         request(client)
     assert caught.value.translations == {20: row(20)}
     assert caught.value.failed_indices == {21}
-    assert len(client.calls) == 2
+    assert len(client.calls) == 3
+    assert "Compact repair" in client.calls[2][0]
     assert all("Source paper" not in str(event) for event in events)
     assert any(fields.get("operation") == "paper_translation" for _, fields in events)
 
@@ -113,7 +114,7 @@ def ranked(index):
 
 
 def test_final_translation_keeps_success_and_original_failed_entry():
-    client = Client([{"papers": [row(0)]}, {"papers": []}])
+    client = Client([{"papers": [row(0)]}, {"papers": []}, {"papers": []}])
     events = []
     papers = [ranked(0), ranked(1)]
     result = translate_ranked_papers(papers, client, event_callback=events.append)
@@ -127,7 +128,7 @@ def test_final_translation_keeps_success_and_original_failed_entry():
 def test_rank_separate_translation_applies_partial_success_without_analysis_changes():
     analysis = {"papers": [dict(index=i, relevance="high", score=.9,
                  reason_zh="保留理由", matched_topics=["COF"]) for i in range(2)]}
-    client = Client([analysis, {"papers": [row(0)]}, {"papers": []}])
+    client = Client([analysis, {"papers": [row(0)]}, {"papers": []}, {"papers": []}])
     result = rank_papers([PaperEntry(title=f"Source {i}", abstract="Evidence") for i in range(2)],
                          InterestProfile(), client, separate_translation=True)
     assert result[0].title_zh == row(0)["title_zh"]
@@ -157,3 +158,17 @@ def test_system_failure_during_repair_stops_remaining_repairs_and_keeps_success(
     assert caught.value.translations == {20: row(20)}
     assert caught.value.failed_indices == {21, 22}
     assert len(client.calls) == 2
+
+
+def test_looping_single_entry_is_recovered_by_compact_repair():
+    """Regression: 2026-11-24 one entry hit output_length on its only repair attempt."""
+    client = Client([{"papers": [row(20)]}, LLMError("length", code="output_length"), {"papers": [row(21)]}])
+    events = []
+    client.metrics.event_callback = lambda name, fields: events.append((name, fields))
+    result = request(client)
+    assert set(result) == {20, 21}
+    assert len(client.calls) == 3
+    compact_prompt = client.calls[2][0]
+    assert "Compact repair" in compact_prompt and "at most 80 Chinese characters" in compact_prompt
+    assert json.loads(compact_prompt.split("PAPERS_JSON:")[-1])[0]["index"] == 21
+    assert any(fields.get("reason") == "recovered_compact" for _, fields in events)

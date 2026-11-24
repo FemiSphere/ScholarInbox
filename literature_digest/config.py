@@ -67,6 +67,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "filtering": {
         "skip_promotional": True,
         "audit_skipped_emails": True,
+        "mark_skipped_as_read": False,
         "academic_sender_allowlist": [],
         "sender_blocklist": [],
         "promotional_keywords": [

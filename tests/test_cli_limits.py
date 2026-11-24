@@ -50,3 +50,18 @@ def test_apply_digest_limits_can_limit_irrelevant_items_independently():
     limited = _apply_digest_limits(ranked, config)
 
     assert [paper.entry.title for paper in limited] == ["promotion 0"]
+
+
+def test_omitted_by_limits_note_reports_hidden_counts_per_level():
+    from literature_digest.cli import _omitted_by_limits_note
+    from literature_digest.models import PaperEntry, RankedPaper
+
+    def paper(level, i):
+        return RankedPaper(entry=PaperEntry(title=f"{level}{i}"), relevance=level, score=.5,
+                           title_zh="题", summary_zh="概述", reason_zh="理由")
+
+    ranked = [paper("medium", i) for i in range(5)] + [paper("low", i) for i in range(3)]
+    displayed = ranked[:2] + ranked[5:]
+    note = _omitted_by_limits_note(ranked, displayed)
+    assert "中相关 3 篇" in note and "低相关" not in note
+    assert _omitted_by_limits_note(ranked, ranked) == ""

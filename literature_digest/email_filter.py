@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,6 +27,16 @@ ACADEMIC_SIGNALS = (
     "science",
     "elsevier",
     "mdpi",
+    "学术",
+    "學術",
+    "期刊",
+    "论文",
+)
+
+# Senders whose mail is always a paper alert; these are parsed locally and must
+# never be dropped by keyword heuristics (paper titles can contain "sale" etc.).
+TRUSTED_ALERT_SENDERS = (
+    "scholaralerts-noreply@google.com",
 )
 
 
@@ -45,6 +56,9 @@ def classify_email(email: EmailMessage, config: dict[str, Any]) -> FilterDecisio
         if blocked.lower() in sender_lower:
             return FilterDecision(True, f"sender blocklist: {blocked}")
 
+    if any(sender in sender_lower for sender in TRUSTED_ALERT_SENDERS):
+        return FilterDecision(False)
+
     for allowed in filtering.get("academic_sender_allowlist", []):
         if allowed.lower() in sender_lower:
             return FilterDecision(False)
@@ -56,14 +70,30 @@ def classify_email(email: EmailMessage, config: dict[str, Any]) -> FilterDecisio
     matched_keywords = [
         keyword
         for keyword in filtering.get("promotional_keywords", [])
-        if keyword.lower() in searchable
+        if _contains_keyword(searchable, keyword)
     ]
 
     if matched_keywords and not has_academic_signal:
         return FilterDecision(True, "promotional keywords: " + ", ".join(matched_keywords[:3]))
 
-    if "unsubscribe" in searchable and any(word in searchable for word in ("coupon", "deal", "save", "buy now")):
+    if _contains_keyword(searchable, "unsubscribe") and any(
+        _contains_keyword(searchable, word) for word in ("coupon", "deal", "save", "buy now")
+    ):
         return FilterDecision(True, "marketing unsubscribe pattern")
 
     return FilterDecision(False)
 
+
+
+def _contains_keyword(text: str, keyword: str) -> bool:
+    """Whole-word match for ASCII keywords; substring match for CJK keywords.
+
+    Plain substring matching made "sale" hit "wholesale" or "Salen", which
+    skipped real Google Scholar alerts on every run.
+    """
+    keyword = keyword.lower().strip()
+    if not keyword:
+        return False
+    if keyword.isascii():
+        return re.search(rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])", text) is not None
+    return keyword in text

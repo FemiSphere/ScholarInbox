@@ -390,11 +390,15 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
     )
     if fallback_count:
         warnings.append(f"本次 {fallback_count} 项 LLM 任务失败，部分条目或推荐使用本地规则回退；请根据日志中的具体原因修复后重跑；邮件提取回退可能遗漏条目。")
+    displayed = _apply_digest_limits(ranked, config)
+    omitted_note = _omitted_by_limits_note(ranked, displayed)
+    if omitted_note:
+        warnings.append(omitted_note)
     run = DigestRun(
         date_label=date_label,
         stats=stats,
         interest_profile=interest_profile,
-        papers=_apply_digest_limits(ranked, config),
+        papers=displayed,
         skipped=skipped if config["filtering"].get("audit_skipped_emails", True) else [],
         warnings=warnings,
     )
@@ -420,10 +424,15 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             return 2
 
     if not dry_run and not sample_mode and not fallback_count and config["gmail"].get("mark_as_read", False):
-        progress.step(f"标记已处理邮件为已读：{len(accepted)} 封")
+        read_ids = [email.id for email in accepted]
+        if config["filtering"].get("mark_skipped_as_read", False):
+            # Skipped mail is listed in the digest for audit; without this it stays
+            # unread forever and occupies max_emails_per_run on every later run.
+            read_ids += [item.email_id for item in skipped]
+        progress.step(f"标记已处理邮件为已读：{len(read_ids)} 封")
         gmail = GmailClient(config, base_dir=base_dir, metrics=metrics)
         try:
-            gmail.mark_as_read([email.id for email in accepted])
+            gmail.mark_as_read(read_ids)
         except GmailConnectionError as exc:
             progress.error(f"Error: {exc}")
             progress.close()
@@ -548,6 +557,20 @@ def _apply_digest_limits(ranked, config: dict[str, Any]):
             irrelevant_count += 1
         result.append(paper)
     return result
+
+
+def _omitted_by_limits_note(ranked, displayed) -> str:
+    """Say how many ranked papers the digest.max_* limits hid; empty when none."""
+    labels = (("high", "高相关"), ("medium", "中相关"), ("low", "低相关"), ("irrelevant", "不相关"))
+    parts = []
+    for level, label in labels:
+        hidden = count_relevance(ranked, level) - count_relevance(displayed, level)
+        if hidden > 0:
+            parts.append(f"{label} {hidden} 篇")
+    if not parts:
+        return ""
+    return ("受显示数量上限（digest.max_*）限制，以下论文已评级但未在本日报展示：" + "、".join(parts)
+            + "。它们仍计入去重索引，之后不会再次出现；如需全部查看，可调大或删除对应上限。")
 
 
 def _shorten(value: str, max_length: int) -> str:

@@ -7,7 +7,7 @@
 | 整体流程、状态保护、数量限制 | `cli.py:main/_main/_apply_digest_limits` | `test_cli_limits.py`、`test_registry_cli.py`、`test_enrichment_pipeline.py` |
 | 默认参数/外置配置覆盖 | `config.py:load_config/_load_external_llm_config`、`llm/factory.py:build_llm_client` | `test_config.py`、`test_operation_settings.py` |
 | Gmail OAuth、读取/代理/附件 | `gmail_client.py:GmailClient` | `test_gmail_client.py` |
-| 推广过滤/兴趣画像 | `email_filter.py`、`interests.py` | `test_filter_and_interests.py` |
+| 推广过滤/兴趣画像、跳过邮件标已读 | `email_filter.py:classify_email`、`interests.py`、`cli.py:_main` | `test_filter_and_interests.py`、`test_skipped_mail.py` |
 | Scholar/期刊邮件提取、解析缓存 | `parsers.py:parse_emails/_parse_non_scholar_email_with_llm` | `test_parsers.py`、`test_parser_resilience.py` |
 | 长邮件边界、图片引用、递归拆分 | `email_chunks.py:build_email_chunks/split_email_chunk` | `test_email_chunks.py`、`test_parser_resilience.py` |
 | DOI/URL/标题批内去重 | `dedupe.py` | `test_dedupe.py` |

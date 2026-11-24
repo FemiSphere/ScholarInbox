@@ -58,6 +58,10 @@ research_interests:
 filtering:
   skip_promotional: true
   audit_skipped_emails: true
+  # 被判为推广而跳过的邮件默认保持未读，会在每次运行中重复出现并占用读取名额。
+  # 设为 true 时，正式运行成功后与已处理邮件一起标为已读（日报中仍列出，便于核对）。
+  mark_skipped_as_read: false
+  # Google Scholar 快讯发件人已内置信任，无需加入此列表。
   academic_sender_allowlist: []
   sender_blocklist: []
   promotional_keywords:
@@ -102,6 +106,8 @@ digest:
   # 非学术推广或错误提取内容会归入“不相关”；HTML 中默认折叠。
   include_irrelevant: true
   language: "zh-CN"
+  # 各级别最多展示的篇数。超出部分已评级但不展示，日报“运行提示”会列出被隐藏的数量；
+  # 这些论文仍写入去重索引，之后不会再出现。
   max_high_relevance: 20
   max_medium_relevance: 30
   max_low_relevance: 80

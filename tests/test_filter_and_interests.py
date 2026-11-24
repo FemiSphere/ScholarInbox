@@ -44,3 +44,29 @@ def test_research_interests_are_structured_by_llm():
 
     assert "COF" in profile.material_systems
     assert profile.high_priority_topics
+
+
+def test_google_scholar_alert_is_never_skipped_by_promotional_keywords():
+    email = EmailMessage(
+        id="scholar",
+        thread_id="t",
+        subject='("penta" OR "pentagonal") AND ("materials") - 新的结果',
+        sender='"Google 学术搜索快讯" <scholaralerts-noreply@google.com>',
+        date=None,
+        text="Wholesale design of pentagonal materials. Special offer of Salen complexes.",
+    )
+
+    assert classify_email(email, DEFAULT_CONFIG).skip is False
+
+
+def test_promotional_keywords_match_whole_words_only():
+    email = EmailMessage(
+        id="words",
+        thread_id="t",
+        subject="New results",
+        sender="alerts@example.com",
+        date=None,
+        text="Wholesale electricity markets and Salen catalysts.",
+    )
+
+    assert classify_email(email, DEFAULT_CONFIG).skip is False
