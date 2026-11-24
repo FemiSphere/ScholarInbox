@@ -135,5 +135,32 @@ def test_llm_cannot_mark_a_doi_paper_irrelevant_without_promotional_signals():
 
     ranked = rank_papers([paper], InterestProfile(), IrrelevantRankingClient())
 
-    assert ranked[0].relevance == "low"
+    # A real paper is never "irrelevant"; outside the field it is folded as off_topic.
+    assert ranked[0].relevance == "off_topic"
+    assert ranked[0].score < 0.15
     assert "明确论文身份" in ranked[0].reason_zh
+
+
+def test_off_topic_is_accepted_from_ranking_and_kept_distinct_from_irrelevant():
+    from literature_digest.ranking import _ranked_from_payload
+
+    entry = PaperEntry(title="Long-term clinical outcomes of statin therapy", doi="10.1/x")
+    ranked = _ranked_from_payload(entry, {"relevance": "off_topic", "score": 0.05,
+                                          "reason_zh": "临床医学，与材料方向无关。", "matched_topics": []})
+    assert ranked.relevance == "off_topic"
+
+
+def test_interest_profile_prompt_requests_broad_fields_and_cache_version_changes():
+    from literature_digest import interests
+
+    captured = {}
+
+    class Client:
+        def complete_json(self, prompt):
+            captured["prompt"] = prompt
+            return {"broad_fields": ["computational materials science"], "summary_zh": "计算材料"}
+
+    profile = interests.analyze_research_interests("computational materials", Client())
+    assert "broad_fields" in captured["prompt"]
+    assert profile.broad_fields == ["computational materials science"]
+    assert interests.INTEREST_CACHE_VERSION >= 2

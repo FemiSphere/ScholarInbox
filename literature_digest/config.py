@@ -101,10 +101,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "output_formats": ["html"],
         "cleanup_old_outputs": False,
         "include_low_relevance": True,
+        "include_off_topic": True,
         "include_irrelevant": True,
         "language": "zh-CN",
         "max_high_relevance": 20,
         "max_medium_relevance": 30,
+        "max_off_topic": None,
         "max_irrelevant": 80,
     },
     "safety": {
@@ -125,6 +127,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "telemetry": {
         "detailed_log_enabled": True,
         "log_dir": "logs/metrics",
+        # Run logs and request metrics older than this many days are deleted after each run; 0 keeps all.
+        "log_retention_days": 30,
         "show_compact_summary": True,
     },
     "performance": {

@@ -103,6 +103,8 @@ digest:
   # false 时，同一天多次运行不会覆盖已有 digest，而是自动追加 -2、-3。
   overwrite_existing: false
   include_low_relevance: true
+  # 学术论文但不属于研究大方向的归入“领域外”；HTML 中默认折叠，只显示标题。
+  include_off_topic: true
   # 非学术推广或错误提取内容会归入“不相关”；HTML 中默认折叠。
   include_irrelevant: true
   language: "zh-CN"
@@ -111,6 +113,8 @@ digest:
   max_high_relevance: 20
   max_medium_relevance: 30
   max_low_relevance: 80
+  # null 表示不限制；领域外只占一行标题。
+  max_off_topic: null
   max_irrelevant: 80
 
 safety:
@@ -133,6 +137,8 @@ telemetry:
   # 终端只显示汇总；逐请求耗时、token 和缓存命中保存到独立日志。
   detailed_log_enabled: true
   log_dir: "logs/metrics"
+  # 每次运行结束后删除文件名日期超过 N 天的运行日志与请求指标；0 表示全部保留。
+  log_retention_days: 30
   show_compact_summary: true
 
 performance:

@@ -43,6 +43,10 @@ def sample_emails() -> list[EmailMessage]:
                 Phonon-limited thermal conductivity in low-dimensional framework materials
               </a>
               <p>10.1234/example.2026.001</p>
+              <a href="https://doi.org/10.1234/example.2026.002">
+                Long-term clinical outcomes of statin therapy in elderly patients
+              </a>
+              <p>10.1234/example.2026.002</p>
             </body></html>
             """,
             text="",

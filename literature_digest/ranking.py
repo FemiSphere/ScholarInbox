@@ -13,7 +13,7 @@ from .concurrency import cooperative_map
 from .interests import profile_to_json
 from .llm import LLMClient, LLMError
 from .llm.base import current_llm_deadline, llm_time_budget, redact_secrets
-from .models import EvidenceRecord, InterestProfile, PaperEntry, RankedPaper, RelevanceLevel
+from .models import RELEVANCE_LEVELS, EvidenceRecord, InterestProfile, PaperEntry, RankedPaper, RelevanceLevel
 from .telemetry import llm_operation
 
 
@@ -125,13 +125,19 @@ Rules:
 {translation_rules}
 - Never use placeholders such as "...", "N/A", or empty strings.
 - Keep formulas, chemical names, material abbreviations, model names, and Greek letters as needed.
-- `relevance` must be one of: "high", "medium", "low", "irrelevant".
+- `relevance` must be one of: "high", "medium", "low", "off_topic", "irrelevant".
 - `score` must be a number from 0 to 1.
-- Use "low" for a genuine academic paper that is weakly related to the research interest profile.
+- Use "low" for a genuine academic paper inside the profile's broad_fields that is only weakly
+  related to the specific interests (same broad discipline, different system/question).
+- Use "off_topic" for a genuine academic paper outside every broad field of the profile (for a
+  materials researcher, e.g. clinical medicine, ecology, finance, pure social science), or one
+  that shares only incidental vocabulary with no transferable system, method or property.
+  When unsure between "low" and "off_topic", choose "low". If broad_fields is empty, infer the
+  broad discipline from the rest of the profile.
 - Use "irrelevant" only when the entry is clearly not an academic paper, such as advertising,
   sales or subscription promotion, product marketing, recruitment, event registration, or a
-  malformed extraction. A valid academic paper outside the user's field must remain "low".
-- For "irrelevant", use a score close to 0, keep the note short, and explain the non-academic signal.
+  malformed extraction. A valid academic paper must never be "irrelevant"; use "off_topic".
+- For "off_topic" and "irrelevant", use a score below 0.15 and a one-sentence reason_zh.
 - Judge relevance only from the research interest profile and paper metadata.
 - Read source_status to distinguish a matched publisher/preprint/repository abstract from an email excerpt or title-only evidence.
 - A source abstract is still not a full-paper reading; do not imply methods/results beyond its text.
@@ -256,7 +262,8 @@ Return only a valid JSON object with this schema:
 - email_excerpt is not a verified complete abstract. publisher_abstract/preprint_abstract/repository_abstract is an
   identity-matched source abstract, not a full-paper reading. Preserve uncertainty and truncation boundaries.
 - Prefer the matched abstract to original_email_excerpt if both are supplied.
-- relevance controls summary length only: high/medium concise explanation, low/irrelevant brief note.
+- relevance controls summary length only: high/medium concise explanation, low brief note,
+  off_topic/irrelevant one short sentence (at most 40 Chinese characters).
 PAPERS_JSON:
 {json.dumps(papers_json, ensure_ascii=False)}
 """.strip()
@@ -472,7 +479,7 @@ def _payload_by_index(
 
 
 def _validate_analysis(item: dict[str, Any]) -> None:
-    if item.get("relevance") not in {"high", "medium", "low", "irrelevant"}:
+    if item.get("relevance") not in RELEVANCE_LEVELS:
         raise LLMError("Ranking response has invalid relevance")
     score = item.get("score")
     if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score) or not 0 <= score <= 1:
@@ -485,7 +492,7 @@ def _validate_analysis(item: dict[str, Any]) -> None:
 
 def _ranked_from_payload(entry: PaperEntry, payload: dict[str, Any]) -> RankedPaper:
     relevance = str(payload.get("relevance", "low")).lower()
-    if relevance not in {"high", "medium", "low", "irrelevant"}:
+    if relevance not in RELEVANCE_LEVELS:
         relevance = "low"
     try:
         score = float(payload.get("score", 0.0))
@@ -497,8 +504,8 @@ def _ranked_from_payload(entry: PaperEntry, payload: dict[str, Any]) -> RankedPa
         relevance = "irrelevant"
         score = 0.0
     elif relevance == "irrelevant" and _has_strong_academic_identity(entry):
-        relevance = "low"
-        score = min(score, 0.24)
+        relevance = "off_topic"
+        score = min(score, 0.14)
         academic_guard_applied = True
 
     title_zh = _valid_generated_text(payload.get("title_zh"), original=entry.title)
@@ -507,7 +514,7 @@ def _ranked_from_payload(entry: PaperEntry, payload: dict[str, Any]) -> RankedPa
     summary_zh = _valid_generated_text(payload.get("summary_zh"))
     reason_zh = _valid_generated_text(payload.get("reason_zh"))
     if academic_guard_applied:
-        reason_zh = "该条目具有 DOI 或 arXiv 等明确论文身份，因此保守保留为低相关学术论文。"
+        reason_zh = "该条目具有 DOI 或 arXiv 等明确论文身份，属于学术论文，归入领域外而非不相关。"
     if relevance == "irrelevant" and not reason_zh:
         reason_zh = "该条目包含明显的推广、活动或其他非学术信号，不属于论文推荐范围。"
     return RankedPaper(
@@ -538,6 +545,7 @@ def _fallback_ranked_batch(
 def _fallback_ranked_paper(entry: PaperEntry, profile: InterestProfile, error_reason: str) -> RankedPaper:
     score, matched_topics = _heuristic_score(entry, profile)
     clearly_nonacademic = _looks_clearly_nonacademic(entry)
+    deprioritized = any(topic.startswith("降权：") for topic in matched_topics)
     relevance: RelevanceLevel = (
         "irrelevant"
         if clearly_nonacademic
@@ -545,6 +553,8 @@ def _fallback_ranked_paper(entry: PaperEntry, profile: InterestProfile, error_re
         if score >= 0.7
         else "medium"
         if score >= 0.28
+        else "off_topic"
+        if deprioritized and score < 0.1
         else "low"
     )
     if clearly_nonacademic:

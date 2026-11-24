@@ -56,6 +56,8 @@ class OfflineStubClient:
                 text = f"{item.get('title', '')} {item.get('abstract', '')}".lower()
                 title = str(item.get("title", "")).lower()
                 score = 0.25
+                if any(term in text for term in ["clinical", "patients", "tumor", "stock market"]):
+                    score = 0.05
                 if any(term in text for term in ["pentagonal", "penta", "cof", "mof"]):
                     score += 0.35
                 if any(term in text for term in ["thermal", "phonon", "conductivity"]):
@@ -80,6 +82,8 @@ class OfflineStubClient:
                     else "medium"
                     if score >= 0.45
                     else "low"
+                    if score >= 0.2
+                    else "off_topic"
                 )
                 if nonacademic:
                     score = 0.0

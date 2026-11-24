@@ -213,9 +213,11 @@ class ProgressReporter:
 
     def _line(self, message: str, *, marker: str, style: str) -> Text:
         line = Text()
+        # Rich still emits bold/dim codes under no_color; plain output must stay escape-free.
+        plain = bool(self.console.no_color)
         if self.show_timestamps:
-            line.append(f"[{datetime.now().strftime('%H:%M:%S')}] ", style="dim")
-        line.append(f"{marker} ", style=style)
+            line.append(f"[{datetime.now().strftime('%H:%M:%S')}] ", style="" if plain else "dim")
+        line.append(f"{marker} ", style="" if plain else style)
         line.append(message)
         return line
 

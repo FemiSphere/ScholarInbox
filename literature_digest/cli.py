@@ -24,7 +24,8 @@ from .interests import (
     read_research_interests,
 )
 from .llm import build_llm_client
-from .models import DigestRun, RunStats, SkippedEmail
+from .housekeeping import prune_old_logs
+from .models import RELEVANCE_LABELS, RELEVANCE_LEVELS, DigestRun, RunStats, SkippedEmail
 from .parsers import parse_emails
 from .paper_registry import (
     PaperRegistry,
@@ -374,6 +375,8 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
 
     if not config["digest"].get("include_low_relevance", True):
         ranked = [paper for paper in ranked if paper.relevance != "low"]
+    if not config["digest"].get("include_off_topic", True):
+        ranked = [paper for paper in ranked if paper.relevance != "off_topic"]
     if not config["digest"].get("include_irrelevant", True):
         ranked = [paper for paper in ranked if paper.relevance != "irrelevant"]
 
@@ -385,6 +388,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         high_relevance=count_relevance(ranked, "high"),
         medium_relevance=count_relevance(ranked, "medium"),
         low_relevance=count_relevance(ranked, "low"),
+        off_topic=count_relevance(ranked, "off_topic"),
         irrelevant=count_relevance(ranked, "irrelevant"),
         sample_mode=sample_mode,
     )
@@ -423,6 +427,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             progress.close()
             return 2
 
+    marked_read = 0
     if not dry_run and not sample_mode and not fallback_count and config["gmail"].get("mark_as_read", False):
         read_ids = [email.id for email in accepted]
         if config["filtering"].get("mark_skipped_as_read", False):
@@ -437,6 +442,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             progress.error(f"Error: {exc}")
             progress.close()
             return 2
+        marked_read = len(read_ids)
 
     if (output_paths and config["digest"].get("cleanup_old_outputs", False)
             and not dry_run and not sample_mode and not fallback_count
@@ -459,7 +465,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         f"Stats: emails={stats.emails_read}, entries={stats.paper_entries_extracted}, "
         f"duplicates={stats.duplicates_removed}, high={stats.high_relevance}, "
         f"medium={stats.medium_relevance}, low={stats.low_relevance}, "
-        f"irrelevant={stats.irrelevant}, skipped={stats.skipped_emails}"
+        f"off_topic={stats.off_topic}, irrelevant={stats.irrelevant}, skipped={stats.skipped_emails}"
     )
     if fallback_count:
         progress.output(f"提示：{fallback_count} 项任务未完整处理，输出包含本地规则回退。", style="yellow")
@@ -476,12 +482,38 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
     metrics_log_path = _write_detailed_metrics_log(metrics, base_dir=base_dir, config=telemetry_config)
     if metrics_log_path is not None:
         progress.detail(f"Detailed request metrics: {metrics_log_path}")
+    if not sample_mode:
+        _prune_logs(config, base_dir, progress)
     if dry_run:
         progress.output("预览模式 · 未修改邮件状态", style="dim")
+    remaining = _remaining_unread_note(unread_estimate, marked_read)
+    if remaining:
+        progress.output(remaining, style="cyan")
     if progress.run_log_path is not None:
         progress.output(f"日志：{progress.run_log_path}", style="dim")
     progress.close()
     return 0
+
+
+def _remaining_unread_note(unread_estimate: int | None, marked_read: int) -> str:
+    """Tell the user how much unread mail is left after this run (Gmail's count is approximate)."""
+    if unread_estimate is None:
+        return ""
+    remaining = max(0, int(unread_estimate) - marked_read)
+    if remaining == 0:
+        return "邮箱中已无符合条件的未读邮件。"
+    return f"邮箱中仍有约 {remaining} 封未读邮件，可再次运行继续处理。"
+
+
+def _prune_logs(config: dict[str, Any], base_dir: Path, progress: ProgressReporter) -> None:
+    telemetry_config = config.get("telemetry", {})
+    retention = int(telemetry_config.get("log_retention_days", 30) or 0)
+    directories = [base_dir / "logs", _resolve_path(telemetry_config.get("log_dir", "logs/metrics"), base_dir)]
+    removed, failed = prune_old_logs(directories, today=date.today(), retention_days=retention)
+    if removed:
+        progress.detail(f"已清理超过 {retention} 天的日志：{removed} 个")
+    for name in failed:
+        progress.detail(f"无法清理旧日志：{name}")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -529,44 +561,39 @@ def _should_use_sample(
     return False, warnings
 
 
+# Per-level display limit keys and their defaults (None = unlimited).
+_DIGEST_LIMITS = {
+    "high": ("max_high_relevance", 20),
+    "medium": ("max_medium_relevance", 30),
+    "low": ("max_low_relevance", None),
+    "off_topic": ("max_off_topic", None),
+    "irrelevant": ("max_irrelevant", None),
+}
+
+
 def _apply_digest_limits(ranked, config: dict[str, Any]):
-    high_limit = int(config["digest"].get("max_high_relevance", 20))
-    medium_limit = int(config["digest"].get("max_medium_relevance", 30))
-    raw_low_limit = config["digest"].get("max_low_relevance")
-    low_limit = None if raw_low_limit is None else int(raw_low_limit)
-    raw_irrelevant_limit = config["digest"].get("max_irrelevant")
-    irrelevant_limit = None if raw_irrelevant_limit is None else int(raw_irrelevant_limit)
-    high_count = medium_count = low_count = irrelevant_count = 0
+    limits = {}
+    for level, (key, default) in _DIGEST_LIMITS.items():
+        raw = config["digest"].get(key, default)
+        limits[level] = None if raw is None else int(raw)
+    counts = dict.fromkeys(limits, 0)
     result = []
     for paper in ranked:
-        if paper.relevance == "high":
-            if high_count >= high_limit:
-                continue
-            high_count += 1
-        elif paper.relevance == "medium":
-            if medium_count >= medium_limit:
-                continue
-            medium_count += 1
-        elif paper.relevance == "low":
-            if low_limit is not None and low_count >= low_limit:
-                continue
-            low_count += 1
-        elif paper.relevance == "irrelevant":
-            if irrelevant_limit is not None and irrelevant_count >= irrelevant_limit:
-                continue
-            irrelevant_count += 1
+        limit = limits.get(paper.relevance)
+        if limit is not None and counts[paper.relevance] >= limit:
+            continue
+        counts[paper.relevance] = counts.get(paper.relevance, 0) + 1
         result.append(paper)
     return result
 
 
 def _omitted_by_limits_note(ranked, displayed) -> str:
     """Say how many ranked papers the digest.max_* limits hid; empty when none."""
-    labels = (("high", "高相关"), ("medium", "中相关"), ("low", "低相关"), ("irrelevant", "不相关"))
     parts = []
-    for level, label in labels:
+    for level in RELEVANCE_LEVELS:
         hidden = count_relevance(ranked, level) - count_relevance(displayed, level)
         if hidden > 0:
-            parts.append(f"{label} {hidden} 篇")
+            parts.append(f"{RELEVANCE_LABELS[level]} {hidden} 篇")
     if not parts:
         return ""
     return ("受显示数量上限（digest.max_*）限制，以下论文已评级但未在本日报展示：" + "、".join(parts)

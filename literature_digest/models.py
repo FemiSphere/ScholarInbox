@@ -6,7 +6,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 
-RelevanceLevel = Literal["high", "medium", "low", "irrelevant"]
+RelevanceLevel = Literal["high", "medium", "low", "off_topic", "irrelevant"]
+
+# Display/ranking order. "off_topic" is a genuine paper outside the user's broad
+# field; "irrelevant" is reserved for non-academic or malformed entries.
+RELEVANCE_LEVELS: tuple[str, ...] = ("high", "medium", "low", "off_topic", "irrelevant")
+RELEVANCE_LABELS: dict[str, str] = {
+    "high": "高相关", "medium": "中相关", "low": "低相关", "off_topic": "领域外", "irrelevant": "不相关",
+}
 
 
 @dataclass(slots=True)
@@ -61,6 +68,7 @@ class InterestProfile:
     high_priority_topics: list[str] = field(default_factory=list)
     medium_priority_topics: list[str] = field(default_factory=list)
     deprioritized_topics: list[str] = field(default_factory=list)
+    broad_fields: list[str] = field(default_factory=list)
     summary_zh: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -97,6 +105,7 @@ class RunStats:
     high_relevance: int = 0
     medium_relevance: int = 0
     low_relevance: int = 0
+    off_topic: int = 0
     irrelevant: int = 0
     sample_mode: bool = False
 

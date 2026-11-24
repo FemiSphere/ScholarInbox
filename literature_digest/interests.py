@@ -11,7 +11,7 @@ from .models import InterestProfile
 from .telemetry import llm_operation
 
 
-INTEREST_CACHE_VERSION = 1
+INTEREST_CACHE_VERSION = 2  # v2 adds broad_fields for the off_topic tier
 
 
 def read_research_interests(path: str | Path) -> str:
@@ -70,6 +70,7 @@ Schema:
   "high_priority_topics": ["..."],
   "medium_priority_topics": ["..."],
   "deprioritized_topics": ["..."],
+  "broad_fields": ["..."],
   "summary_zh": "..."
 }}
 
@@ -80,6 +81,10 @@ Rules:
 - Put the strongest matching topics into `high_priority_topics`.
 - Put related but weaker topics into `medium_priority_topics`.
 - Put clearly out-of-scope topics into `deprioritized_topics`.
+- `broad_fields`: 2-5 broad disciplines that bound the research as a whole (for example
+  "computational materials science", "condensed matter physics"). Use an explicit
+  "大方向"/"broad field" section when the note has one; otherwise infer them. A paper
+  outside every broad field is treated as off-topic, so keep them broad, not project-specific.
 - If the note is brief or ambiguous, infer a compact profile that is still useful for ranking.
 
 Research-interest note:
@@ -116,6 +121,7 @@ def fallback_interest_profile(text: str) -> InterestProfile:
         "high_priority_topics": topics,
         "medium_priority_topics": [],
         "deprioritized_topics": [],
+        "broad_fields": [],
         "summary_zh": summary or "研究兴趣摘要为空，使用默认回退配置。",
     }
     return profile_from_payload(payload)
@@ -130,6 +136,7 @@ def profile_from_payload(payload: dict[str, Any]) -> InterestProfile:
         high_priority_topics=_string_list(payload.get("high_priority_topics")),
         medium_priority_topics=_string_list(payload.get("medium_priority_topics")),
         deprioritized_topics=_string_list(payload.get("deprioritized_topics")),
+        broad_fields=_string_list(payload.get("broad_fields")),
         summary_zh=str(payload.get("summary_zh", "")).strip(),
         raw=payload,
     )
@@ -146,6 +153,7 @@ def profile_to_json(profile: InterestProfile) -> str:
             "high_priority_topics": profile.high_priority_topics,
             "medium_priority_topics": profile.medium_priority_topics,
             "deprioritized_topics": profile.deprioritized_topics,
+            "broad_fields": profile.broad_fields,
             "summary_zh": profile.summary_zh,
         },
         ensure_ascii=False,
