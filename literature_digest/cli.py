@@ -661,32 +661,52 @@ def _open_result_cache(config: dict[str, Any], base_dir: Path, progress: Progres
         return None
 
 
+# Levels shown as compact rows only get a Chinese title (cheap); high/medium get title + summary.
+_TITLE_ONLY_LEVELS = {"low", "off_topic", "irrelevant"}
+_TITLE_ONLY_BATCH_SIZE = 30
+
+
 def _translate_displayed(displayed, llm, config: dict[str, Any], cache: ResultCache | None,
                          progress: ProgressReporter, *, progress_callback, event_callback, cancel_event):
     model_fingerprint = _llm_cache_fingerprint(config)
-    keys = {id(paper): translation_key(paper, model_fingerprint) for paper in displayed}
     finished: dict[int, Any] = {}
-    pending = []
+    groups = {False: [], True: []}
+    keys: dict[int, str] = {}
     for paper in displayed:
-        hit = cache.get_translation(keys[id(paper)]) if cache is not None else None
+        title_only = paper.relevance in _TITLE_ONLY_LEVELS
+        keys[id(paper)] = translation_key(paper, model_fingerprint, title_only=title_only)
+        hit = cache.get_translation(keys[id(paper)], title_only=title_only) if cache is not None else None
         if hit is None:
-            pending.append(paper)
+            groups[title_only].append(paper)
         else:
             finished[id(paper)] = replace(paper, title_zh=hit["title_zh"], summary_zh=hit["summary_zh"], translated=True)
+    pending_count = len(groups[False]) + len(groups[True])
     if finished:
-        progress.detail(f"翻译结果缓存命中 {len(finished)} 篇，仅需翻译 {len(pending)} 篇")
-    if pending:
-        batch_size = int(config["performance"].get("ranking_batch_size", 10))
-        progress.item(0, (len(pending) + batch_size - 1) // batch_size, "生成中文阅读摘要")
-        translated = translate_ranked_papers(
-            pending, llm, batch_size=batch_size,
-            max_workers=int(config["performance"].get("ranking_max_workers", 3)),
-            progress=progress_callback, event_callback=event_callback, cancel_event=cancel_event,
-        )
-        for original, result in zip(pending, translated):
-            finished[id(original)] = result
-        if cache is not None:
-            cache.put_translations([(keys[id(original)], result) for original, result in zip(pending, translated)])
+        progress.detail(f"翻译结果缓存命中 {len(finished)} 篇，仅需翻译 {pending_count} 篇")
+    if pending_count:
+        full_batch = int(config["performance"].get("ranking_batch_size", 10))
+        total = sum((len(groups[mode]) + size - 1) // size
+                    for mode, size in ((False, full_batch), (True, _TITLE_ONLY_BATCH_SIZE)) if groups[mode])
+        done = 0
+
+        def report(current: int, _total: int) -> None:
+            progress_callback(done + current, total)
+
+        progress.item(0, total, "生成中文阅读摘要")
+        for title_only, size in ((False, full_batch), (True, _TITLE_ONLY_BATCH_SIZE)):
+            pending = groups[title_only]
+            if not pending:
+                continue
+            translated = translate_ranked_papers(
+                pending, llm, batch_size=size, title_only=title_only,
+                max_workers=int(config["performance"].get("ranking_max_workers", 3)),
+                progress=report, event_callback=event_callback, cancel_event=cancel_event,
+            )
+            done += (len(pending) + size - 1) // size
+            for original, result in zip(pending, translated):
+                finished[id(original)] = result
+            if cache is not None:
+                cache.put_translations([(keys[id(original)], result) for original, result in zip(pending, translated)])
     return [finished[id(paper)] for paper in displayed]
 
 

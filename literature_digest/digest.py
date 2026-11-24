@@ -268,13 +268,13 @@ def render_html(run: DigestRun, output_dir: str | Path | None = None) -> str:
       </div>
       <p class="empty" id="empty" hidden>当前筛选条件下没有匹配论文。</p>
       {'<section class="panel"><h2>跳过的邮件</h2><ul class="skipped-list">' + skipped_items + '</ul></section>' if skipped_items else ''}
-      <footer>由本地 ScholarInbox 工作流生成。收藏与已读状态只保存在本机浏览器中，跨日报共享；打开原文会自动标为已读。</footer>
+      <footer>由本地 ScholarInbox 工作流生成。收藏与已读状态只保存在本机浏览器中，跨日报共享，保留 60 天；打开原文会自动标为已读。</footer>
     </main>
   </div>
   <div class="lightbox" id="lightbox" hidden><img alt="放大的 TOC 或邮件图片"></div>
   <dialog id="export-dialog" aria-labelledby="export-title">
     <h2 id="export-title">导出收藏</h2>
-    <p>包含在本机浏览器中收藏过的所有论文（含往期日报）。</p>
+    <p>包含近 60 天在本机浏览器中收藏的论文（含往期日报）；更早的收藏与日报一样自动清除。</p>
     <textarea id="export-text" readonly></textarea>
     <div class="dialog-actions">
       <button type="button" class="tool" id="export-copy">复制</button>
@@ -405,7 +405,8 @@ def _render_paper_card(paper: RankedPaper, index: int, output_dir: str | Path | 
     )
 
     if paper.relevance in _ROW_LEVELS:
-        summary_html = f'<p class="summary">{escape(paper.summary_zh)}</p>' if paper.relevance != "irrelevant" else ""
+        summary_html = (f'<p class="summary">{escape(paper.summary_zh)}</p>'
+                        if paper.summary_zh and paper.relevance != "irrelevant" else "")
         return f"""
       <article class="paper-card row" id="p-{index}" {attributes}>
         <details class="row-details">

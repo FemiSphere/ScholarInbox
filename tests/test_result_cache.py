@@ -144,3 +144,21 @@ def test_rerun_reuses_cached_results_and_successful_real_run_clears_cache(tmp_pa
     assert second.ranked_titles == [] and second.translated_titles == []
     count = sqlite3.connect(cache_file).execute("SELECT COUNT(*) FROM results").fetchone()[0]
     assert count == 0
+
+
+def test_low_relevance_rows_use_title_only_translation(tmp_path, monkeypatch):
+    prompts = []
+
+    class Watch(OfflineStubClient):
+        def complete_json(self, prompt):
+            if "TRANSLATE_PAPERS_JSON" in prompt:
+                prompts.append(prompt)
+            return super().complete_json(prompt)
+
+    code, _ = _run(tmp_path, monkeypatch, Watch())
+    assert code == 0
+    title_only = [p for p in prompts if "summary_zh" not in p]
+    full = [p for p in prompts if "summary_zh" in p]
+    assert title_only and full
+    html = (tmp_path / "outputs/2026-11-25-digest.html").read_text(encoding="utf-8")
+    assert "未生成中文摘要" not in html

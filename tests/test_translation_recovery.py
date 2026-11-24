@@ -172,3 +172,22 @@ def test_looping_single_entry_is_recovered_by_compact_repair():
     assert "Compact repair" in compact_prompt and "at most 80 Chinese characters" in compact_prompt
     assert json.loads(compact_prompt.split("PAPERS_JSON:")[-1])[0]["index"] == 21
     assert any(fields.get("reason") == "recovered_compact" for _, fields in events)
+
+
+def test_title_only_translation_requests_and_validates_titles_only():
+    client = Client([{"papers": [dict(index=20, title_zh="中文标题20"), dict(index=21, title_zh="Source paper 1")]},
+                     {"papers": [dict(index=21, title_zh="中文标题21")]}])
+    entries = [PaperEntry(title=f"Source paper {i}", abstract="long abstract " * 50) for i in range(2)]
+    sources = [dict(index=20 + i, title=e.title, abstract=e.abstract) for i, e in enumerate(entries)]
+    result = _request_translations(sources, entries, client, 20, title_only=True)
+    assert result[20]["title_zh"] == "中文标题20" and result[21]["title_zh"] == "中文标题21"
+    first_prompt = client.calls[0][0]
+    assert "summary_zh" not in first_prompt and "long abstract" not in first_prompt
+    assert len(client.calls) == 2  # the untranslated title was repaired alone
+
+
+def test_title_only_papers_get_empty_summary_instead_of_placeholder():
+    client = Client([{"papers": [dict(index=0, title_zh="中文标题")]}])
+    paper = ranked(0)
+    result = translate_ranked_papers([paper], client, title_only=True)
+    assert result[0].title_zh == "中文标题" and result[0].summary_zh == "" and result[0].translated

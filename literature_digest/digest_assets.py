@@ -280,6 +280,7 @@ DIGEST_JS = r"""
 
   // ---- reader state (per browser; shared by every digest opened from this machine) ----
   const KEY = 'scholarinbox:v1';
+  const RETENTION_MS = 60 * 24 * 3600 * 1000;
   const state = { read: {}, starred: {} };
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
@@ -287,9 +288,10 @@ DIGEST_JS = r"""
     state.starred = saved.starred || {};
   } catch (error) { /* storage unavailable: state lives for this page only */ }
   function save() {
-    // Read marks expire after 90 days (digests themselves are pruned after 60); stars stay until removed.
-    const expiry = Date.now() - 90 * 24 * 3600 * 1000;
+    // Read and starred marks expire after 60 days, matching digest.cleanup_old_outputs.
+    const expiry = Date.now() - RETENTION_MS;
     for (const id of Object.keys(state.read)) if (state.read[id] < expiry) delete state.read[id];
+    for (const id of Object.keys(state.starred)) if (!(state.starred[id].t >= expiry)) delete state.starred[id];
     const ids = Object.keys(state.read);
     if (ids.length > 6000) {
       ids.sort((a, b) => state.read[a] - state.read[b]).slice(0, ids.length - 6000).forEach(id => delete state.read[id]);
@@ -330,6 +332,7 @@ DIGEST_JS = r"""
     $('#star-count').textContent = String(Object.keys(state.starred).length);
     $('#star-chip-count').textContent = String(starredHere);
   }
+  save();
   cards.forEach(paint);
 
   // ---- filtering ----

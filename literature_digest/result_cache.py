@@ -42,9 +42,11 @@ def analysis_key(entry: PaperEntry, profile_fingerprint: str, model_fingerprint:
                           profile_fingerprint, model_fingerprint)
 
 
-def translation_key(paper: RankedPaper, model_fingerprint: str) -> str:
-    evidence: EvidenceRecord | None = paper.evidence
+def translation_key(paper: RankedPaper, model_fingerprint: str, *, title_only: bool = False) -> str:
     entry = paper.entry
+    if title_only:
+        return "tt:" + _digest(entry.title, model_fingerprint)
+    evidence: EvidenceRecord | None = paper.evidence
     return "t:" + _digest(entry.title, entry.abstract, entry.venue, paper.relevance,
                           evidence.abstract if evidence else "", model_fingerprint)
 
@@ -144,11 +146,12 @@ class ResultCache:
         self._put_many([(key, {field: getattr(paper, field) for field in _ANALYSIS_FIELDS})
                         for key, paper in items if not paper.fallback])
 
-    def get_translation(self, key: str) -> dict[str, str] | None:
+    def get_translation(self, key: str, *, title_only: bool = False) -> dict[str, str] | None:
         payload = self._get(key)
-        if payload is None or not all(isinstance(payload.get(field), str) and payload[field] for field in _TRANSLATION_FIELDS):
+        required = ("title_zh",) if title_only else _TRANSLATION_FIELDS
+        if payload is None or not all(isinstance(payload.get(field), str) and payload[field] for field in required):
             return None
-        return payload
+        return {"title_zh": payload["title_zh"], "summary_zh": payload.get("summary_zh", "") if not title_only else ""}
 
     def put_translations(self, items: list[tuple[str, RankedPaper]]) -> None:
         self._put_many([(key, {field: getattr(paper, field) for field in _TRANSLATION_FIELDS})
