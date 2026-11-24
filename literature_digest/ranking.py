@@ -187,7 +187,7 @@ PAPERS_JSON:
             offset + i: {
                 "relevance": paper.relevance, "score": paper.score,
                 "reason_zh": paper.reason_zh, "matched_topics": paper.matched_topics,
-                "title_zh": paper.title_zh, "summary_zh": paper.summary_zh,
+                "title_zh": paper.title_zh, "summary_zh": paper.summary_zh, "fallback": True,
             }
             for i, paper in enumerate(fallback)
         }
@@ -452,7 +452,7 @@ def translate_ranked_papers(
                     event_callback(f"论文翻译 {number}/{total}：LLM 失败（{type(error).__name__}，code={error.code}{detail}），回退本地规则")
             translations = error.translations if isinstance(error, TranslationRecoveryError) else {}
         return [replace(paper, title_zh=translations[offset + i]["title_zh"],
-                        summary_zh=translations[offset + i]["summary_zh"])
+                        summary_zh=translations[offset + i]["summary_zh"], translated=True)
                 if offset + i in translations else paper
                 for i, paper in enumerate(batch)]
 
@@ -490,6 +490,11 @@ def _validate_analysis(item: dict[str, Any]) -> None:
         raise LLMError("Ranking response has invalid matched_topics")
 
 
+def ranked_from_analysis(entry: PaperEntry, payload: dict[str, Any]) -> RankedPaper:
+    """Rebuild a ranked paper from stored analysis fields (same guards as a live response)."""
+    return _ranked_from_payload(entry, payload)
+
+
 def _ranked_from_payload(entry: PaperEntry, payload: dict[str, Any]) -> RankedPaper:
     relevance = str(payload.get("relevance", "low")).lower()
     if relevance not in RELEVANCE_LEVELS:
@@ -525,6 +530,7 @@ def _ranked_from_payload(entry: PaperEntry, payload: dict[str, Any]) -> RankedPa
         summary_zh=summary_zh or "未生成中文摘要，已使用默认占位说明。",
         reason_zh=reason_zh or "未生成中文推荐理由，已使用默认占位说明。",
         matched_topics=_string_list(payload.get("matched_topics")),
+        fallback=bool(payload.get("fallback", False)),
     )
 
 
@@ -576,6 +582,7 @@ def _fallback_ranked_paper(entry: PaperEntry, profile: InterestProfile, error_re
         summary_zh=summary,
         reason_zh=reason,
         matched_topics=matched_topics,
+        fallback=True,
     )
 
 

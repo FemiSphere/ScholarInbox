@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -9,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from threading import RLock, Timer
 from collections import Counter
+from dataclasses import replace
 import re
 
 from .config import load_config, resolve_path as _resolve_path
@@ -21,10 +23,12 @@ from .interests import (
     analyze_research_interests,
     fallback_interest_profile,
     load_or_analyze_research_interests,
+    profile_to_json,
     read_research_interests,
 )
 from .llm import build_llm_client
 from .housekeeping import prune_old_logs
+from .result_cache import ResultCache, ResultCacheError, analysis_key, translation_key
 from .models import RELEVANCE_LABELS, RELEVANCE_LEVELS, DigestRun, RunStats, SkippedEmail
 from .parsers import parse_emails
 from .paper_registry import (
@@ -32,7 +36,7 @@ from .paper_registry import (
     PaperRegistryError,
     bootstrap_registry_from_markdown,
 )
-from .ranking import count_relevance, rank_papers, translate_ranked_papers
+from .ranking import count_relevance, rank_papers, ranked_from_analysis, translate_ranked_papers
 from .enrichment import enrich_ranked_papers
 from urllib.parse import urlsplit
 from .sample_data import sample_emails
@@ -109,13 +113,19 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
 
     resources["progress"] = progress
     output_lock = RLock()
+    # Core fallbacks (extraction / ranking) keep mail unread; translation-only fallbacks do not,
+    # because ratings are intact and the paper is still shown with its original title.
     fallback_count = 0
+    translation_fallback_count = 0
     fallback_reasons: Counter[str] = Counter()
     def report_detail(message: str) -> None:
-        nonlocal fallback_count
+        nonlocal fallback_count, translation_fallback_count
         with output_lock:
             progress.detail(message)
             if "回退本地规则" in message:
+                if message.startswith("论文翻译"):
+                    translation_fallback_count += 1
+                    return
                 fallback_count += 1
                 match = re.search(r"code=([a-z0-9_]+)", message)
                 fallback_reasons[match.group(1) if match else "llm_error"] += 1
@@ -302,6 +312,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
                 f"跨日期去重完成：移除 {registry_duplicates_removed} 篇（{reason_text}）"
             )
 
+    separate_translation = bool(config["performance"].get("separate_translation", True))
     interests_path = _resolve_path(config["research_interests"]["path"], base_dir)
     example_interests = Path(__file__).resolve().parent.parent / "research_interests.example.md"
     if sample_mode and not interests_path.exists() and example_interests.exists():
@@ -341,22 +352,39 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             and config["llm"].get("provider") == "openai_compatible"
             and urlsplit(api_config.get("base_url", "")).hostname == "api.deepseek.com"
         )
-        progress.detail(f"调用 LLM 分批排序和摘要：{len(candidate_entries)} 篇论文")
+        result_cache = None if sample_mode else _open_result_cache(config, base_dir, progress)
+        resources["result_cache"] = result_cache
+        model_fingerprint = _llm_cache_fingerprint(config)
+        profile_fingerprint = hashlib.sha256(profile_to_json(interest_profile).encode("utf-8")).hexdigest()
+        cached_ranked, to_rank = [], []
+        for entry in candidate_entries:
+            hit = result_cache.get_analysis(analysis_key(entry, profile_fingerprint, model_fingerprint)) if result_cache else None
+            if hit is None:
+                to_rank.append(entry)
+            else:
+                cached_ranked.append(ranked_from_analysis(entry, hit))
+        if cached_ranked:
+            progress.detail(f"评级结果缓存命中 {len(cached_ranked)} 篇，仅需分析 {len(to_rank)} 篇")
+        progress.detail(f"调用 LLM 分批评级：{len(to_rank)} 篇论文")
         batch_size = int(config["performance"].get("ranking_batch_size", 10))
-        progress.item(0, (len(candidate_entries) + batch_size - 1) // batch_size, "论文排序与中文摘要")
+        progress.item(0, (len(to_rank) + batch_size - 1) // batch_size, "论文排序与中文摘要")
         ranked = rank_papers(
-            candidate_entries,
+            to_rank,
             interest_profile,
             llm,
             batch_size=batch_size,
-            analysis_only=enrichment_enabled,
-            separate_translation=bool(config["performance"].get("separate_translation", True)),
+            analysis_only=enrichment_enabled or separate_translation,
+            separate_translation=separate_translation,
             abstract_max_chars=int(config["performance"].get("ranking_abstract_max_chars", 2000)),
             max_workers=int(config["performance"].get("ranking_max_workers", 3)),
             progress=lambda current, total: report_items(current, total, "论文排序与中文摘要"),
             event_callback=report_detail,
             cancel_event=metrics.cancel_event,
-        )
+        ) if to_rank else []
+        if result_cache is not None:
+            result_cache.put_analyses([(analysis_key(paper.entry, profile_fingerprint, model_fingerprint), paper)
+                                       for paper in ranked])
+        ranked = sorted(cached_ranked + ranked, key=lambda paper: paper.score, reverse=True)
         if enrichment_enabled:
             if not fallback_count:
                 try:
@@ -372,14 +400,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
                     progress.detail(f"联网摘要补充未完成，保留初筛结果：{type(exc).__name__}")
             else:
                 progress.detail("核心提取或初筛出现回退，本次跳过可选联网补充")
-            progress.item(0, (len(ranked) + batch_size - 1) // batch_size, "生成中文阅读摘要")
-            ranked = translate_ranked_papers(
-                ranked, llm, batch_size=batch_size,
-                max_workers=int(config["performance"].get("ranking_max_workers", 3)),
-                progress=lambda current, total: report_items(current, total, "生成中文阅读摘要"),
-                event_callback=report_detail, cancel_event=metrics.cancel_event,
-            )
-        progress.detail("LLM 排序和摘要完成")
+        progress.detail("LLM 评级完成")
     else:
         if deduped.unique_entries and registry_duplicates_removed:
             retention_days = registry.retention_days if registry is not None else 30
@@ -416,6 +437,17 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
     omitted_note = _omitted_by_limits_note(ranked, displayed)
     if omitted_note:
         warnings.append(omitted_note)
+    if separate_translation and displayed:
+        # Translate only what the digest shows; papers hidden by digest.max_* are not paid for.
+        displayed = _translate_displayed(
+            displayed, llm, config, resources.get("result_cache"), progress,
+            progress_callback=lambda current, total: report_items(current, total, "生成中文阅读摘要"),
+            event_callback=report_detail, cancel_event=metrics.cancel_event,
+        )
+        progress.detail("中文标题与概述完成")
+    if translation_fallback_count:
+        warnings.append(f"本次 {translation_fallback_count} 批中文翻译未完整完成，相关论文显示原英文标题或占位概述；"
+                        "评级不受影响，邮件按正常流程处理。")
     run = DigestRun(
         date_label=date_label,
         stats=stats,
@@ -462,6 +494,12 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             return 2
         marked_read = len(read_ids)
 
+    cache = resources.get("result_cache")
+    if cache is not None:
+        if not dry_run and not fallback_count:
+            cache.clear()  # these papers are now in the registry and will not come back
+        cache.close()
+
     if (output_paths and config["digest"].get("cleanup_old_outputs", False)
             and not dry_run and not sample_mode and not fallback_count
             and not metrics.cancel_event.is_set()):
@@ -492,7 +530,9 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
                   "request_limit": "拆分请求达到上限", "llm_error": "提取或生成异常"}
         progress.output("原因：" + "；".join(f"{labels.get(code, code)} {count} 项" for code, count in fallback_reasons.items()), style="yellow")
         if not dry_run and not sample_mode:
-            progress.output("邮件保持未读，未更新去重索引；可在问题修复后重跑。", style="yellow")
+            progress.output("邮件保持未读，未更新去重索引；可在问题修复后重跑（已成功的评级与翻译会复用缓存）。", style="yellow")
+    elif translation_fallback_count:
+        progress.output(f"提示：{translation_fallback_count} 批中文翻译未完整完成，评级正常，邮件已按正常流程处理。", style="yellow")
     for output_path in output_paths:
         progress.output_file(output_path)
     for line in metrics.summary_lines(include_request_details=False):
@@ -606,6 +646,48 @@ def _apply_digest_limits(ranked, config: dict[str, Any]):
         counts[paper.relevance] = counts.get(paper.relevance, 0) + 1
         result.append(paper)
     return result
+
+
+def _open_result_cache(config: dict[str, Any], base_dir: Path, progress: ProgressReporter) -> ResultCache | None:
+    settings = config.get("result_cache", {})
+    if not settings.get("enabled", True):
+        return None
+    try:
+        return ResultCache(_resolve_path(settings.get("path", "data/cache/results.sqlite3"), base_dir),
+                           ttl_days=float(settings.get("ttl_days", 7)),
+                           max_entries=int(settings.get("max_entries", 5000)))
+    except (ResultCacheError, ValueError) as exc:
+        progress.detail(f"评级/翻译结果缓存不可用，本次不使用：{exc}")
+        return None
+
+
+def _translate_displayed(displayed, llm, config: dict[str, Any], cache: ResultCache | None,
+                         progress: ProgressReporter, *, progress_callback, event_callback, cancel_event):
+    model_fingerprint = _llm_cache_fingerprint(config)
+    keys = {id(paper): translation_key(paper, model_fingerprint) for paper in displayed}
+    finished: dict[int, Any] = {}
+    pending = []
+    for paper in displayed:
+        hit = cache.get_translation(keys[id(paper)]) if cache is not None else None
+        if hit is None:
+            pending.append(paper)
+        else:
+            finished[id(paper)] = replace(paper, title_zh=hit["title_zh"], summary_zh=hit["summary_zh"], translated=True)
+    if finished:
+        progress.detail(f"翻译结果缓存命中 {len(finished)} 篇，仅需翻译 {len(pending)} 篇")
+    if pending:
+        batch_size = int(config["performance"].get("ranking_batch_size", 10))
+        progress.item(0, (len(pending) + batch_size - 1) // batch_size, "生成中文阅读摘要")
+        translated = translate_ranked_papers(
+            pending, llm, batch_size=batch_size,
+            max_workers=int(config["performance"].get("ranking_max_workers", 3)),
+            progress=progress_callback, event_callback=event_callback, cancel_event=cancel_event,
+        )
+        for original, result in zip(pending, translated):
+            finished[id(original)] = result
+        if cache is not None:
+            cache.put_translations([(keys[id(original)], result) for original, result in zip(pending, translated)])
+    return [finished[id(paper)] for paper in displayed]
 
 
 def _omitted_by_limits_note(ranked, displayed) -> str:

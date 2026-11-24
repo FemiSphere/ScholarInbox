@@ -63,6 +63,7 @@ rg -n '回退|timeout|output_length|budget|web_|evidence_' logs/digest-指定运
 | `data/cache/email_parsing/` | 成功邮件提取缓存 | 本地私有；当前没有全局容量回收，不宣称自动清完 |
 | `data/cache/research_interests.json` | 兴趣画像缓存 | 按内容哈希失效；不等于兴趣源文件 |
 | `data/cache/web_evidence.sqlite3` | 来源摘要缓存 | 300 条/8 MiB/30 天，负缓存 6 小时，自动淘汰；停机后可删 |
+| `data/cache/results.sqlite3` | 每篇论文的评级与翻译结果（仅成功结果） | 正式运行成功后清空；否则 7 天过期、最多 5000 条（`result_cache.*`）；回退重跑或 dry-run 后正式运行时复用；停机后可删 |
 | `data/toc_images/` | 日报图片资源 | 已有 HTML 可能引用，不单独批量删除 |
 | `data/config_backups/`、`data/validation/` | 私有备份/历史核验 | 不是程序抓取垃圾；有目的地保留/人工归档。2026-11-25 根目录的旧配置备份、令牌备份与 OAuth 笔记移至 `data/config_backups/root-files-20261125/` |
 | `.pytest_cache/`、`__pycache__/` | 可再生成的测试/字节码 | 无运行进程时可清理；不要顺带删未知 `.tmp` 内容 |

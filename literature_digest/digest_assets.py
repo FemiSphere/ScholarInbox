@@ -287,6 +287,9 @@ DIGEST_JS = r"""
     state.starred = saved.starred || {};
   } catch (error) { /* storage unavailable: state lives for this page only */ }
   function save() {
+    // Read marks expire after 90 days (digests themselves are pruned after 60); stars stay until removed.
+    const expiry = Date.now() - 90 * 24 * 3600 * 1000;
+    for (const id of Object.keys(state.read)) if (state.read[id] < expiry) delete state.read[id];
     const ids = Object.keys(state.read);
     if (ids.length > 6000) {
       ids.sort((a, b) => state.read[a] - state.read[b]).slice(0, ids.length - 6000).forEach(id => delete state.read[id]);

@@ -59,6 +59,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "cache_max_bytes": 8 * 1024 * 1024,
         "cache_ttl_days": 30,
     },
+    "result_cache": {
+        # Per-paper ranking/translation results reused after a fallback rerun; cleared after a
+        # successful real run, otherwise expired after ttl_days and capped at max_entries.
+        "enabled": True,
+        "path": "data/cache/results.sqlite3",
+        "ttl_days": 7,
+        "max_entries": 5000,
+    },
     "research_interests": {
         "path": "research_interests.md",
         "refresh_each_run": False,

@@ -94,6 +94,9 @@ class RankedPaper:
     reason_zh: str
     matched_topics: list[str] = field(default_factory=list)
     evidence: EvidenceRecord | None = None
+    # Bookkeeping (not rendered): local-rule fallback rating / successful final translation.
+    fallback: bool = False
+    translated: bool = False
 
 
 @dataclass(slots=True)
