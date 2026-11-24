@@ -15,6 +15,7 @@
 | 跨日期去重/首次从旧日报回填 | `paper_registry.py`、`recent_outputs.py` | `test_paper_registry.py`、`test_recent_outputs.py`、`test_registry_cli.py` |
 | 相关性五级（含领域外）、分析与翻译隔离 | `models.py:RELEVANCE_LEVELS`、`ranking.py:rank_papers/_paper_input/translate_ranked_papers`、`interests.py`（`broad_fields`） | `test_translation_recovery.py`、`test_translation_cli_recovery.py`、`test_ranking_separation.py`、`test_ranking_evidence.py` |
 | Search/Fetch、论文身份/摘要核验 | `web_evidence.py:WebEvidenceClient/direct_arxiv/acquire_evidence/extract_abstract` | `test_web_evidence.py` |
+| 免费元数据摘要（Crossref/OpenAlex、DOI/PII/标题解析） | `scholarly_sources.py:ScholarlyClient/acquire_from_metadata/titles_match` | `test_scholarly_sources.py` |
 | 高/中相关补充、复评与可选失败 | `enrichment.py:enrich_ranked_papers` | `test_enrichment_pipeline.py` |
 | SQLite 摘要缓存/容量/过期 | `evidence_cache.py:EvidenceCache` | `test_evidence_cache.py` |
 | HTTP 等待、重试、JSON/length、操作模式 | `llm/openai_compatible.py:OpenAICompatibleClient`、`llm/base.py` | `test_api_resilience.py`、`test_api_output_validation.py`、`test_operation_settings.py` |

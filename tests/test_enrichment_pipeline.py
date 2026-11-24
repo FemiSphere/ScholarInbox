@@ -20,7 +20,9 @@ def evidence():
 
 
 def configuration(**overrides):
-    return {'web_enrichment': {'cache_path': 'cache.sqlite3', **overrides}, 'performance': {'ranking_batch_size': 10}}
+    # Free metadata lookups are covered in test_scholarly_sources.py; keep these tests offline.
+    return {'web_enrichment': {'cache_path': 'cache.sqlite3', 'metadata_sources_enabled': False, **overrides},
+            'performance': {'ranking_batch_size': 10}}
 
 
 def refine(entries, profile, llm, **kwargs):

@@ -493,10 +493,28 @@ SOURCE_PAGE:\n''' + content
     return abstract if 80 <= len(abstract) <= max_chars and start >= 0 and labeled else None
 
 
+# Pages that refuse automated Fetch (HTTP 404 after ~12 s in past runs) and whose abstracts the
+# free metadata APIs do not carry either; Search may still return their content.
+_FETCH_BLOCKED_HOSTS = ("sciencedirect.com", "linkinghub.elsevier.com")
+_FETCH_BLOCKED_DOI_PREFIXES = ("10.1016/",)
+
+
+def _fetch_blocked(url: str) -> bool:
+    parts = urllib.parse.urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if _host_matches(host, _FETCH_BLOCKED_HOSTS):
+        return True
+    return host in {"doi.org", "dx.doi.org"} and parts.path.lstrip("/").casefold().startswith(_FETCH_BLOCKED_DOI_PREFIXES)
+
+
 def acquire_evidence(entry: Any, client: Any, llm: Any = None, *, max_searches: int = 1,
                      max_fetches: int = 2, max_content_chars: int = 80000,
-                     max_abstract_chars: int = 12000):
-    """Find a matching primary-source abstract without persisting raw pages."""
+                     max_abstract_chars: int = 12000, metadata: Any = None):
+    """Find a matching primary-source abstract without persisting raw pages.
+
+    Order: arXiv abstract page (free) -> Crossref/OpenAlex metadata (free, ``metadata``)
+    -> paid Search -> bounded Fetch of the original/DOI URL.
+    """
     from .models import EvidenceRecord
     seen: set[str] = set()
     fetches = 0
@@ -530,7 +548,7 @@ def acquire_evidence(entry: Any, client: Any, llm: Any = None, *, max_searches: 
 
     def fetched(url: str):
         nonlocal fetches
-        if url in seen or fetches >= max_fetches or source_kind(url) is None:
+        if url in seen or fetches >= max_fetches or source_kind(url) is None or _fetch_blocked(url):
             return None
         seen.add(url)
         fetches += 1
@@ -555,6 +573,11 @@ def acquire_evidence(entry: Any, client: Any, llm: Any = None, *, max_searches: 
             evidence = inspect(response, url)
             if evidence is not None:
                 return evidence
+    if metadata is not None:
+        from .scholarly_sources import acquire_from_metadata
+        evidence = acquire_from_metadata(entry, metadata, max_chars=max_abstract_chars)
+        if evidence is not None:
+            return evidence
     # Preserve the direct arXiv /abs/ path before paid discovery.
     if is_arxiv:
         evidence = fetched(url)

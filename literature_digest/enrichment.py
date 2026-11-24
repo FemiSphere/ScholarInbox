@@ -15,10 +15,12 @@ from .evidence_cache import EvidenceCache, CacheError
 from .llm.base import llm_time_budget
 from .models import EvidenceRecord, RankedPaper
 from .ranking import rank_papers
+from .scholarly_sources import ScholarlyClient
 from .web_evidence import WebEvidenceClient, acquire_evidence
 
 
-_NEGATIVE_CACHE_POLICY = 4
+# Bumped when the acquisition chain changes so earlier "not found" results are retried.
+_NEGATIVE_CACHE_POLICY = 5
 
 
 class _OptionalTaskCancel(Event):
@@ -59,7 +61,7 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
                          base_dir: Path, metrics=None, cancel_event: Event | None = None,
                          progress: Callable[[str, int, int], None] | None = None,
                          detail: Callable[[str], None] | None = None,
-                         client=None) -> list[RankedPaper]:
+                         client=None, metadata_client=None) -> list[RankedPaper]:
     """Keep original results on optional failure; only verified abstracts reach reranking."""
     options = {**DEFAULT_CONFIG['web_enrichment'], **config.get('web_enrichment', {})}
     targets = [paper for paper in papers if paper.relevance in {'high', 'medium'}]
@@ -89,6 +91,10 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
         search_count=3, min_interval_seconds=0.5,
         max_retries=max(0, int(options['max_retries'])),
     )
+    if metadata_client is None and options.get('metadata_sources_enabled', True):
+        metadata_client = ScholarlyClient(metrics=metrics,
+                                          timeout_seconds=float(options.get('metadata_timeout_seconds', 10)),
+                                          max_requests=int(options.get('metadata_max_requests', 300)))
     cache = None
     if options['cache_enabled']:
         path = Path(options['cache_path'])
@@ -124,7 +130,8 @@ def enrich_ranked_papers(papers: list[RankedPaper], profile, llm, config: dict, 
             try:
                 with llm_time_budget(min(float(options['paper_budget_seconds']),
                                          max(0, deadline - monotonic()))):
-                    evidence = acquire_evidence(paper.entry, client, llm)
+                    extra = {'metadata': metadata_client} if metadata_client is not None else {}
+                    evidence = acquire_evidence(paper.entry, client, llm, **extra)
             except Exception as exc:
                 # Optional errors never enter the core fallback/read-state signal.
                 code = getattr(exc, 'code', type(exc).__name__)

@@ -44,7 +44,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "web_enrichment": {
         "enabled": True,
-        "max_papers": 30,
+        # Covers every displayed high/medium paper (max_high_relevance 20 + max_medium_relevance 30).
+        "max_papers": 50,
+        # Free Crossref/OpenAlex lookups run before the paid DeepSeek Search/Fetch.
+        "metadata_sources_enabled": True,
+        "metadata_timeout_seconds": 10,
+        "metadata_max_requests": 300,
         "max_requests": 80,
         "max_workers": 3,
         "budget_seconds": 480,

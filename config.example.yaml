@@ -175,7 +175,12 @@ performance:
 # 高/中相关论文补充摘要，失败保留初筛；仅 DeepSeek 正式运行启用。
 web_enrichment:
   enabled: true
-  max_papers: 30
+  # 覆盖全部展示的高/中相关论文（默认 20 + 30）。
+  max_papers: 50
+  # 先查免费的 Crossref / OpenAlex（只发送 DOI 与标题，不带个人信息），拿不到再用 DeepSeek Search/Fetch。
+  metadata_sources_enabled: true
+  metadata_timeout_seconds: 10
+  metadata_max_requests: 300
   max_requests: 80
   max_workers: 3
   budget_seconds: 480
