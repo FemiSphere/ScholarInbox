@@ -51,19 +51,20 @@ rg -n '回退|timeout|output_length|budget|web_|evidence_' logs/digest-指定运
 | 路径 | 用途 | 保留/清理规则 |
 | --- | --- | --- |
 | `literature_digest/`、`tests/`、`scripts/` | 源码、测试、启动/诊断脚本 | Git 管理；不为美观改导入/入口 |
-| `config/`、`config.example.yaml` | 公开模板与本地覆盖 | 模板可提交；私有文件不提交 |
+| `literature_digest/presets/`、`config.example.yaml`、`research_interests.example.md` | 公开预设与模板 | 可提交 |
+| `config/llm/*.local.yaml`、`config.local.yaml`、`research_interests.md` | 本地配置与个人研究兴趣 | 已忽略，不提交 |
 | `.env`、OAuth 文件、令牌备份 | 私有认证 | 保留原路径，禁止输出正文或自动清除 |
 | `research_interests.md` | 用户维护的当前科研兴趣 | 不是缓存；不要自动改写研究方向 |
 | `docs/`、`docs/history/` | 当前导航/机制、历史证据 | 按任务读取，不批量载入历史 |
 | `examples/` | 公开阅读页示例 | 与私有 outputs 区分 |
 | `outputs/` | MD/HTML 日报 | 默认长期保留。开启 `digest.cleanup_old_outputs` 后，正式成功运行仅清理文件名日期早于当天减 60 天的日报，保留本次输出。 |
-| `logs/`、`logs/metrics/` | 诊断证据 | 本次不自动轮转；需另行约定保留期 |
+| `logs/`、`logs/metrics/` | 诊断证据 | 每次非 sample 运行结束后，删除文件名日期早于 `telemetry.log_retention_days`（默认 30）天的 `digest-*.log`、`requests-*.jsonl`、`metrics-*.log`；其他文件不动，0 表示全部保留 |
 | `data/paper_registry.json` | 近 30 天去重身份 | 不当作缓存清除；丢失会影响重复处理 |
 | `data/cache/email_parsing/` | 成功邮件提取缓存 | 本地私有；当前没有全局容量回收，不宣称自动清完 |
 | `data/cache/research_interests.json` | 兴趣画像缓存 | 按内容哈希失效；不等于兴趣源文件 |
 | `data/cache/web_evidence.sqlite3` | 来源摘要缓存 | 300 条/8 MiB/30 天，负缓存 6 小时，自动淘汰；停机后可删 |
 | `data/toc_images/` | 日报图片资源 | 已有 HTML 可能引用，不单独批量删除 |
-| `data/config_backups/`、`data/validation/` | 私有备份/历史核验 | 不是程序抓取垃圾；有目的地保留/人工归档 |
+| `data/config_backups/`、`data/validation/` | 私有备份/历史核验 | 不是程序抓取垃圾；有目的地保留/人工归档。2026-11-25 根目录的旧配置备份、令牌备份与 OAuth 笔记移至 `data/config_backups/root-files-20261125/` |
 | `.pytest_cache/`、`__pycache__/` | 可再生成的测试/字节码 | 无运行进程时可清理；不要顺带删未知 `.tmp` 内容 |
 | `*.egg-info/` | editable 安装元数据 | 已忽略；不当临时日志删除，可能影响安装元数据查询 |
 

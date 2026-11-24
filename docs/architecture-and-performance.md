@@ -6,12 +6,12 @@
 
 ```text
 __main__ / 启动脚本 → cli.main
-  → .env + 主 YAML + 外置 LLM 配置
+  → .env + 主 YAML（含 llm.preset 预设）+ 可选外置 LLM 配置
   → Gmail 读取 MIME / 邮件过滤
   → Scholar 本地解析；其他邮件有序分块 + AI 提取
   → 批内去重 + 近 30 天身份索引过滤
   → 研究兴趣画像（哈希缓存）
-  → 初筛相关性
+  → 初筛相关性（高/中/低/领域外/不相关）
   → 可选：高/中相关 → Search/Fetch 原始摘要 → 身份/原文核验 → 复评
   → 最终中文标题与概述翻译
   → 展示数量限制 → MD / HTML
@@ -47,7 +47,7 @@ __main__ / 启动脚本 → cli.main
 
 阶段前后相继，默认提取/排序 worker 各 3，不是同时占 6。排序默认每批 10 篇；长邮件按条目/正文窗口拆块，截断只重分失败块。可选摘要复评串行批次共享剩余时间预算。
 
-具体参数只在 [主模板](../config.example.yaml)、[LLM 模板](../config/llm/deepseek.example.yaml) 和对应专题维护；本地覆盖可能不同。整次预算、每封预算、逻辑请求预算与单次 socket 超时共同约束等待。
+具体参数只在 [主模板](../config.example.yaml)、[LLM 预设](../literature_digest/presets/deepseek.yaml) 和对应专题维护；本地覆盖可能不同。整次预算、每封预算、逻辑请求预算与单次 socket 超时共同约束等待。
 
 性能诊断先看阶段墙钟耗时，再看请求重叠、重试与 token。并发请求的耗时之和不能直接与运行墙钟时间比较。`scripts/benchmark_performance.py` 是模拟延迟的编排基准，不代表真实 API 速度或推荐准确率。
 

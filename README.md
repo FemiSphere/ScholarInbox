@@ -4,101 +4,121 @@
 
 **把学术提醒邮件，整理成可快速筛选的个性化文献日报。**
 
-Gmail · Google Scholar / 期刊周报 · DeepSeek / Codex CLI · HTML · 可选 Markdown
+Gmail · Google Scholar / 期刊周报 · DeepSeek / OpenAI 兼容接口 / Codex CLI · HTML
 
-[在线示例](https://htmlpreview.github.io/?https://github.com/FemiSphere/ScholarInbox/blob/master/examples/2026-04-30-digest.html) · [文档入口](docs/README.md) · [维护地图](docs/code-map.md)
+[在线示例](https://htmlpreview.github.io/?https://github.com/FemiSphere/ScholarInbox/blob/master/examples/2026-04-30-digest.html) · [English](README.en.md) · [文档入口](docs/README.md)
 
 > 循此苦旅，以抵星辰。
 
 </div>
 
-## 工作流程
+## 它做什么
 
 ```text
-邮件读取/过滤 → 条目提取/长邮件分块 → 批内与跨日期去重
-  → 按研究兴趣初筛 → 可选原始摘要补充与复评
-  → 中文标题/概述 → 可搜索、筛选的 HTML
-  → 核心成功后，按配置标记邮件已读
+读取 Gmail 未读提醒 → 过滤推广邮件 → 提取论文条目（长邮件分块）
+  → 批内与近 30 天跨日期去重 → 按你的研究兴趣评级
+  → 高/中相关可选联网补充原始摘要并复评 → 中文标题与概述
+  → 生成 HTML 日报 → 核心步骤成功后按配置标记已读
 ```
 
-研究兴趣由 `research_interests.md` 维护。相关性分高、中、低；正常但偏离方向的论文仍属于低相关，推广及非学术条目单列。不等同于全文精读。
+相关性分五级：
 
-DeepSeek 模板仅在相关性分析/复评时开启思考，邮件提取和翻译保持非思考。联网补充仅使用身份匹配的原始摘要，失败保留初筛；页面只增加摘要来源链接。详见 [摘要补充](docs/web-abstract-enrichment.md)。
+| 级别 | 含义 | 页面中 |
+| --- | --- | --- |
+| 高相关 / 中相关 | 与当前课题直接相关 / 有可用联系 | 完整卡片 |
+| 低相关 | 同一大方向内，但与具体课题联系较弱 | 单行列表，点击展开 |
+| 领域外 | 是学术论文，但不属于你的研究大方向 | 默认折叠，仅标题 |
+| 不相关 | 推广、活动、错误提取等非学术内容 | 默认折叠 |
 
-## 安装与配置
+HTML 日报支持搜索与筛选、已读/收藏（保存在本机浏览器，跨日报共享）、隐藏已读、导出收藏为 Markdown、图片放大，以及顺滑的展开与滚动动效（遵循系统“减少动态效果”设置）。
 
-需要 Python 3.12+；本项目推荐并验证 Python 3.13.18。使用专用环境。
+## 五步上手
+
+需要 Python 3.12+（推荐 3.13）。
 
 ```bash
+# 1. 获取代码并安装到独立环境
 git clone https://github.com/FemiSphere/ScholarInbox.git
 cd ScholarInbox
-python -m venv .venv
-source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
 python -m pip install -e ".[dev]"
-cp config.example.yaml config.local.yaml
+
+# 2. 交互式初始化：选择模型、写入 API key、生成配置和研究兴趣文件
+scholar-inbox init
+
+# 3. 离线自检（不访问 Gmail，不产生费用）
+scholar-inbox doctor
+
+# 4. 离线演示
+scholar-inbox --sample --dry-run
+
+# 5. 读取少量真实邮件试运行，再正式运行
+scholar-inbox --dry-run --max-emails 5
+scholar-inbox --no-dry-run
 ```
 
-在需要新建环境时，也可从仓库根目录执行 `conda env create -f environment.yml`；该文件使用环境名 `literature-digest-mac`，已有同名环境时不能直接创建。`requirements.lock` 记录本次在 macOS ARM64、Python 3.13.18 上验证的依赖版本；其他平台仍需自行验证。
+`init` 会提示你准备两样东西：
 
-已有安装使用现有项目环境，无需重复安装。当前 Mac 使用 `literature-digest-mac` Conda 环境；Windows 激活方式及启动入口见 [快捷运行](docs/automation-and-shortcuts.md)。
+- **Gmail 授权文件**：在 Google Cloud 启用 Gmail API，创建“桌面应用”类型的 OAuth 客户端，下载为项目根目录的 `credentials.json`。首次正式运行会打开浏览器授权并生成 `token.json`。
+- **研究兴趣**：编辑 `research_interests.md`（由 [模板](research_interests.example.md) 复制）。用自然语言写，**“大方向”一节决定哪些论文会被折叠为领域外**。
 
-- Gmail：启用 Gmail API，创建 Desktop App OAuth Client，凭据放根目录 `credentials.json`；首次授权后生成 `token.json`。
-- DeepSeek：复制 `config/llm/deepseek.example.yaml` 为 `config/llm/deepseek.local.yaml`，主配置设 `llm.config_path` 指向它；密钥写根目录 `.env` 的 `DEEPSEEK_API_KEY`。
-- Codex CLI：对应模板为 `config/llm/codex_cli.example.yaml`。
-- 真实配置及凭据不进 Git。合并顺序和模式见 [LLM 配置](docs/deepseek-api-guide.md)。
+> `python -m literature_digest` 与 `scholar-inbox` 等价；在没有安装入口脚本时可用前者。
 
-## 运行
-
-从项目根目录执行：
+## 日常使用
 
 ```bash
-# 完全离线，不读真实邮箱或调用在线 API
-python -m literature_digest --sample --dry-run
-
-# 读取少量真实邮件，可能付费调用 API，但不修改 Gmail 状态/索引
-python -m literature_digest --dry-run --max-emails 5
-
-# 正式运行，允许已配置的副作用
-python -m literature_digest --no-dry-run
+scholar-inbox --no-dry-run          # 正式运行：生成日报，成功后按配置标为已读
+scholar-inbox --dry-run             # 预览：可能调用付费 API，但不修改 Gmail 和去重索引
+scholar-inbox --reauth-gmail        # 重新授权 Gmail
 ```
 
-只有正式运行、`gmail.mark_as_read: true` 且核心任务无回退，才会标记已处理邮件为已读；不删除邮件。核心任务回退时仍可能生成可读 HTML，但会提示不完整，并保留未读和去重索引状态。可选联网失败保留初筛结果，不按核心失败处理。
+- 日报在 `outputs/`，终端结尾给出可点击的文件链接，并提示邮箱中还剩多少未读邮件。
+- 只有正式运行、`gmail.mark_as_read: true` 且核心步骤无回退时才标记已读；程序从不删除邮件。若核心步骤回退，日报仍会生成并提示不完整，邮件保持未读以便重跑。
+- macOS 可用 `scripts/run_digest_macos.sh`（自动定位环境、可设进程级代理）；Windows 用 `scripts/run_digest.bat`。见 [快捷运行与自动化](docs/automation-and-shortcuts.md)。
 
-日报默认只输出 HTML。若同时需要 Markdown，在 `config.local.yaml` 的 `digest` 下设置 `output_formats: ["html", "md"]`。
+## 常用配置
 
-在 `digest` 下设置 `cleanup_old_outputs: true`，可在正式运行成功后清理超过 60 天的日报。清理按文件名日期判断，同时适用于 Markdown 和 HTML。
+`config.local.yaml` 只需写要改的键，全部选项见 [config.example.yaml](config.example.yaml)：
 
-日报在 `outputs/`，日志在 `logs/`，请求指标在 `logs/metrics/`，本地索引/缓存/图片在 `data/`。这些目录被 Git 忽略。不要因清理中间文件而删除用户日报、索引、图片和历史诊断证据。
-
-macOS 一键入口：
-
-```bash
-scripts/run_digest_macos.sh --sample --dry-run
+```yaml
+llm:
+  preset: deepseek            # deepseek（推荐）/ openai_compatible / codex_cli
+gmail:
+  max_emails_per_run: 50
+  mark_as_read: true
+digest:
+  max_high_relevance: 20      # 各级别展示上限；超出部分会在“运行提示”中说明
+  max_medium_relevance: 30
+  cleanup_old_outputs: true   # 正式运行后清理 60 天前的日报
+filtering:
+  mark_skipped_as_read: false # 被判为推广的邮件是否也标为已读
+telemetry:
+  log_retention_days: 30      # 自动清理 30 天前的运行日志
 ```
 
-可为该脚本配置 `文献` 别名；`SCHOLAR_INBOX_PROXY_URL` 仅让脚本子进程使用指定代理。配置步骤见 [快捷命令、代理与自动化](docs/automation-and-shortcuts.md)。终端 HTML 路径使用 OSC 8 链接；详细请求信息保留在日志。
+API key 写在项目根目录 `.env`（如 `DEEPSEEK_API_KEY=...`）。模型预设与覆盖方式见 [LLM 配置](docs/llm-configuration.md)。
 
-## 目录与维护入口
+## 目录
 
 ```text
-AGENTS.md                代理维护约束（先读）
-literature_digest/       Python 源码
-config.example.yaml      主配置模板
-config/llm/              LLM 模板与被忽略的本地覆盖
-tests/                   离线测试
-scripts/                 启动、诊断、模拟基准
-research_interests.md    用户当前研究兴趣
-docs/README.md           按任务选择文档
-docs/code-map.md         模块/函数/测试定位
-docs/maintenance.md      排障与文件保留规则
-docs/history/            历史记录，默认不载入上下文
-examples/                公开阅读页示例
+literature_digest/        源码；presets/ 为内置模型预设
+tests/                    离线测试
+scripts/                  启动脚本（macOS / Windows）、诊断与基准
+docs/                     文档（docs/README.md 为入口；history/ 为历史记录）
+examples/                 公开示例日报
+config.example.yaml       全部配置项参考
+research_interests.example.md   研究兴趣模板
 ```
 
-后续优化先读 `AGENTS.md`，再从代码地图选相关文件；无需重复扫描所有历史日报、日志、数据和文档。完整文档导航见 [docs/README.md](docs/README.md)。
+本地运行产生、已被 Git 忽略的内容：`config.local.yaml`、`research_interests.md`、`.env`、`credentials.json`、`token.json`、`outputs/`（日报）、`logs/`（日志）、`data/`（去重索引、缓存、图片）。
 
-## 验证与边界
+## 开发与维护
 
-在项目环境运行 `python -B -m pytest -q`；编排/渲染变化再跑离线 sample，检查配置所选的输出格式。纯文档调整只检查链接、代码路径、参数一致性及 diff。
+```bash
+python -B -m pytest -q                         # 全套离线测试
+python -B -m literature_digest --sample --dry-run --quiet --no-color
+```
 
-邮件模板、站点访问与 API 可用性仍影响提取和摘要覆盖率。数据不足会保留限定表述；新增摘要及思考模式是否改善推荐准确率，需要人工标注评估。现有缓存与日志的保留规则见 [维护指南](docs/maintenance.md#目录与清理)。
+维护约定见 [AGENTS.md](AGENTS.md)，模块定位见 [代码地图](docs/code-map.md)，排障见 [维护指南](docs/maintenance.md)。
+
+评级基于标题、邮件片段和可核验的原始摘要，不等同于全文精读；高相关不代表结论已被核验。

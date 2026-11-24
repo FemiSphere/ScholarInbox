@@ -17,7 +17,10 @@ INTEREST_CACHE_VERSION = 2  # v2 adds broad_fields for the off_topic tier
 def read_research_interests(path: str | Path) -> str:
     interests_path = Path(path)
     if not interests_path.exists():
-        raise FileNotFoundError(f"Research interests file not found: {interests_path}")
+        raise FileNotFoundError(
+            f"Research interests file not found: {interests_path}. "
+            "Run `scholar-inbox init`, or copy research_interests.example.md to research_interests.md and edit it."
+        )
     return interests_path.read_text(encoding="utf-8").strip()
 
 

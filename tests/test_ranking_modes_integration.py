@@ -9,7 +9,7 @@ from literature_digest.telemetry import RunMetrics
 
 
 def test_example_policy_reaches_real_ranking_and_translation_payloads(tmp_path, monkeypatch):
-    example = Path(__file__).resolve().parents[1] / 'config/llm/deepseek.example.yaml'
+    example = Path(__file__).resolve().parents[1] / 'literature_digest/presets/deepseek.yaml'
     config_path = tmp_path / 'config.yaml'
     config_path.write_text(f'llm:\n  config_path: "{example}"\n')
     config = load_config(config_path)

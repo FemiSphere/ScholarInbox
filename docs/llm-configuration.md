@@ -1,15 +1,27 @@
-# DeepSeek 配置与操作模式
+# LLM 配置与操作模式
 
 本文记录仓库当前接入机制，不维护平台价格或永久有效的模型名单。模型名称与额度以现用本地配置和当日官方文档为准；早期说明保留在 [历史目录](history/2026-08-20-deepseek-api-guide.md)。
 
 ## 配置入口
 
-1. 从 [DeepSeek 模板](../config/llm/deepseek.example.yaml) 复制 `config/llm/deepseek.local.yaml`。
-2. 在主配置中设置 `llm.config_path: config/llm/deepseek.local.yaml`。
-3. `.env` 保存 `DEEPSEEK_API_KEY`；YAML 的 `api_key_env` 只填写环境变量名。
-4. 从项目根目录运行，先用 `--sample --dry-run` 检查本地流程。
+推荐用 `scholar-inbox init` 生成配置；手动配置时在 `config.local.yaml` 写：
 
-配置合并为：内置默认 → 主 YAML → 外置 LLM YAML 覆盖 `llm`；实际请求再按 operation 应用独立模式、输出额度和预算。排查时读取需要的字段，不输出完整私有配置或 `.env`。
+```yaml
+llm:
+  preset: deepseek          # 或 openai_compatible / codex_cli
+  # 需要覆盖预设的键直接写在这里，例如：
+  # openai_compatible:
+  #   temperature: 0.1
+```
+
+- 内置预设位于 [`literature_digest/presets/`](../literature_digest/presets/)：`deepseek.yaml`（推荐，含分操作思考设置）、`openai_compatible.yaml`（需填写 `base_url`、`model`）、`codex_cli.yaml`。
+- `.env` 保存 `DEEPSEEK_API_KEY`（或预设中 `api_key_env` 指定的变量名）；YAML 中只写变量名。
+- 进阶：`llm.config_path` 可指向一份完整的外部 LLM 配置（如已有的 `config/llm/deepseek.local.yaml`），它最后覆盖 `llm`。旧路径 `config/llm/*.example.yaml` 会自动映射到同名预设。
+- `scholar-inbox doctor` 离线检查后端、密钥和凭据是否齐全；`--sample --dry-run` 检查本地流程。
+
+配置合并顺序：内置默认 → 预设（`llm.preset`）→ 主 YAML 中的 `llm` 键 → 外置 LLM YAML（`llm.config_path`）；实际请求再按 operation 应用独立模式、输出额度和预算。排查时读取需要的字段，不输出完整私有配置或 `.env`。
+
+联网摘要补充目前仅在 DeepSeek 官方主机上启用；其他后端沿用初筛与翻译流程。
 
 ## 模式分工
 

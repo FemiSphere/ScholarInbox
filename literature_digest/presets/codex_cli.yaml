@@ -1,9 +1,6 @@
-# Codex CLI LLM 配置模板
-#
-# 使用方法：
-# 1. 如果你继续使用 Codex CLI，可以直接让主配置指向本文件。
-# 2. 如果需要本地私有修改，可复制为 config/llm/codex_cli.local.yaml。
-# 3. config/llm/*.local.yaml 已加入 .gitignore。
+# Codex CLI 预设（内置）：使用本机已登录的 `codex` 命令，无需 API key。
+#   llm:
+#     preset: codex_cli
 
 provider: "codex_cli"
 

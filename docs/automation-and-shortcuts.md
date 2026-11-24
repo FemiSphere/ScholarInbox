@@ -82,8 +82,7 @@ codex exec --ephemeral ...
 
 ```yaml
 llm:
-  provider: "openai_compatible"
-  config_path: "config/llm/deepseek.local.yaml"
+  preset: deepseek
 ```
 
 ## Windows 桌面一键运行

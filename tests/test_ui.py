@@ -22,14 +22,14 @@ def test_rich_banner_uses_large_logo_quote_and_dim_metadata(tmp_path):
     log_path = tmp_path / "logs" / "digest.log"
     reporter = ProgressReporter(console=console, run_log_path=log_path)
 
-    reporter.banner(provider="Codex CLI · gpt-5.4-mini", mode="正式运行")
+    reporter.banner(provider="Codex CLI · gpt-5.4-mini", mode="正式运行", display_name="测试用户")
     reporter.close()
 
     rendered = Text.from_ansi(output.getvalue()).plain
     log_text = log_path.read_text(encoding="utf-8")
     assert "█████" in rendered
     assert APP_QUOTE in rendered
-    assert f"{APP_AUTHOR} · v{__version__}" in rendered
+    assert f"测试用户 · v{__version__}" in rendered
     assert "Codex CLI · gpt-5.4-mini · 正式运行" in rendered
     assert "\x1b[" not in log_text
     assert APP_NAME in log_text
@@ -207,3 +207,9 @@ def test_disabled_banner_keeps_existing_progress_and_osc8_behavior():
     reporter.output_file('/tmp/digest.html')
     reporter.close()
     assert "\x1b]8;" in output.getvalue()
+
+
+def test_banner_without_display_name_shows_only_version():
+    from literature_digest.ui import _banner_metadata
+    assert _banner_metadata("") == f"v{__version__}"
+    assert _banner_metadata("  Alice ") == f"Alice · v{__version__}"

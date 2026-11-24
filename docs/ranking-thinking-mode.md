@@ -2,7 +2,7 @@
 
 ## 当前生效行为
 
-本地外置配置 `config/llm/deepseek.local.yaml` 已更新；下一次启动自动生效。
+分操作设置写在 [DeepSeek 预设](../literature_digest/presets/deepseek.yaml)（或本地 `llm.config_path` 指向的外置配置）中，下一次启动自动生效。
 
 | 操作 | 模式 | 输出 |
 | --- | --- | --- |

@@ -1,5 +1,7 @@
 .DS_Store
 config.local.yaml
+# Personal research profile; research_interests.example.md is the shared template.
+research_interests.md
 config.local.yaml*
 config/llm/*.local.yaml
 credentials.json

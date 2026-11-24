@@ -8,7 +8,7 @@
 | 修改代码、定位职责和测试 | [代码与测试地图](code-map.md) | 对应源码与测试 |
 | 理解流水线/失败边界 | [当前架构](architecture-and-performance.md) | [数据类型](../literature_digest/models.py) |
 | 程序变慢、回退、取消或文件清理 | [维护与排障](maintenance.md) | 同次运行的日志/请求指标 |
-| LLM 配置覆盖、思考模式 | [DeepSeek 配置](deepseek-api-guide.md) | [排序与翻译分离](ranking-thinking-mode.md) |
+| LLM 配置覆盖、思考模式 | [LLM 配置](llm-configuration.md) | [排序与翻译分离](ranking-thinking-mode.md) |
 | 周报/期刊目录提取不全、length | [长邮件与截断恢复](long-email-extraction.md) | `email_chunks.py`、`parsers.py` |
 | 搜索摘要、复评、缓存 | [来源摘要补充](web-abstract-enrichment.md) | `web_evidence.py`、`enrichment.py`、`evidence_cache.py` |
 | 跨日期重复/漏收 | [去重机制](deduplication.md) | `paper_registry.py`、`dedupe.py` |

@@ -1,0 +1,28 @@
+# 通用 OpenAI 兼容接口预设（如自建网关或其他兼容服务）。
+# 在 config.local.yaml 中写：
+#   llm:
+#     preset: openai_compatible
+#     openai_compatible:
+#       base_url: "https://your-endpoint/v1"
+#       model: "your-model"
+#       api_key_env: "OPENAI_API_KEY"
+# 注意：联网摘要补充目前只在 DeepSeek 官方接口上启用，其他接口沿用初筛与翻译流程。
+
+provider: "openai_compatible"
+timeout_seconds: 300
+operation_timeouts:
+  email_extraction: 45
+  paper_ranking: 90
+request_budget_seconds: 120
+max_output_tokens: 4000
+
+openai_compatible:
+  base_url: ""
+  api_key_env: "OPENAI_API_KEY"
+  model: ""
+  temperature: 0.2
+  reasoning_effort: ""
+  response_format_json: true
+  max_retries: 1
+  retry_backoff_seconds: 1.0
+  extra_body: {}

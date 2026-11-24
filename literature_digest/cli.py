@@ -41,6 +41,14 @@ from .ui import ProgressReporter
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] in {"init", "doctor"}:
+        from .setup_wizard import run_doctor, run_init
+        try:
+            return (run_init if arguments[0] == "init" else run_doctor)(arguments[1:])
+        except (KeyboardInterrupt, EOFError):
+            print("\n已取消。", file=sys.stderr)
+            return 130
     metrics = RunMetrics()
     resources: dict[str, Any] = {}
     outcome = "failed"
@@ -143,6 +151,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             provider="Gmail OAuth",
             mode="重新授权",
             show_banner=bool(ui_config.get("banner_enabled", True)),
+        display_name=str(ui_config.get("display_name") or ""),
         )
         progress.step("开始重新授权 Gmail OAuth")
         gmail = GmailClient(config, base_dir=base_dir, metrics=metrics)
@@ -161,6 +170,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         provider=_ui_provider_label(config, sample_mode=sample_mode),
         mode=_ui_run_mode(sample_mode=sample_mode, dry_run=dry_run),
         show_banner=bool(ui_config.get("banner_enabled", True)),
+        display_name=str(ui_config.get("display_name") or ""),
     )
     progress.detail("初始化完成")
 
@@ -293,7 +303,15 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             )
 
     interests_path = _resolve_path(config["research_interests"]["path"], base_dir)
-    interest_text = read_research_interests(interests_path)
+    example_interests = Path(__file__).resolve().parent.parent / "research_interests.example.md"
+    if sample_mode and not interests_path.exists() and example_interests.exists():
+        interests_path = example_interests  # the offline demo works on a fresh clone
+    try:
+        interest_text = read_research_interests(interests_path)
+    except FileNotFoundError as exc:
+        progress.error(f"Error: {exc}")
+        progress.close()
+        return 2
     if candidate_entries:
         progress.step("准备研究兴趣画像")
         interest_config = config["research_interests"]
@@ -517,7 +535,10 @@ def _prune_logs(config: dict[str, Any], base_dir: Path, progress: ProgressReport
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate a daily academic literature digest.")
+    parser = argparse.ArgumentParser(
+        description="Generate a daily academic literature digest.",
+        epilog="Setup commands: `scholar-inbox init` (guided setup), `scholar-inbox doctor` (offline self-check).",
+    )
     parser.add_argument("--config", help="Path to config YAML. Defaults to config.local.yaml if present.")
     parser.add_argument("--dry-run", action="store_true", help="Do not modify Gmail state.")
     parser.add_argument("--no-dry-run", action="store_true", help="Allow configured non-dry-run actions.")

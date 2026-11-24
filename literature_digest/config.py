@@ -122,6 +122,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "ui": {
         "banner_enabled": True,
+        "display_name": "",
         "color_enabled": True,
     },
     "telemetry": {
@@ -177,7 +178,42 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
     if not isinstance(loaded, dict):
         raise ValueError(f"Config file must contain a mapping: {config_path}")
     config = deep_merge(config, loaded)
+    config = _apply_llm_preset(config, loaded.get("llm"), yaml)
     return _load_external_llm_config(config, config_path.parent, yaml)
+
+
+PRESET_DIR = Path(__file__).resolve().parent / "presets"
+# Former template paths now served by the packaged presets, so old configs keep working.
+_LEGACY_TEMPLATE_PRESETS = {
+    "config/llm/deepseek.example.yaml": "deepseek",
+    "config/llm/codex_cli.example.yaml": "codex_cli",
+}
+
+
+def available_presets() -> list[str]:
+    return sorted(path.stem for path in PRESET_DIR.glob("*.yaml"))
+
+
+def load_preset(name: str, yaml_module: Any | None = None) -> dict[str, Any]:
+    if yaml_module is None:
+        import yaml as yaml_module
+    path = PRESET_DIR / f"{name}.yaml"
+    if not path.is_file():
+        raise ValueError(f"Unknown llm.preset {name!r}; available: {', '.join(available_presets())}")
+    loaded = yaml_module.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(loaded, dict):
+        raise ValueError(f"LLM preset must contain a mapping: {path}")
+    return loaded
+
+
+def _apply_llm_preset(config: dict[str, Any], user_llm: Any, yaml_module: Any) -> dict[str, Any]:
+    """defaults <- preset <- the user's own llm keys (so inline overrides win)."""
+    if not isinstance(user_llm, dict) or not user_llm.get("preset"):
+        return config
+    preset = load_preset(str(user_llm["preset"]), yaml_module)
+    merged = deep_merge(DEFAULT_CONFIG["llm"], preset)
+    config["llm"] = deep_merge(merged, user_llm)
+    return config
 
 
 def _load_external_llm_config(config: dict[str, Any], base_dir: Path, yaml_module: Any) -> dict[str, Any]:
@@ -188,6 +224,9 @@ def _load_external_llm_config(config: dict[str, Any], base_dir: Path, yaml_modul
     llm_config_path = Path(config_path_value)
     if not llm_config_path.is_absolute():
         llm_config_path = base_dir / llm_config_path
+    legacy = _LEGACY_TEMPLATE_PRESETS.get(Path(config_path_value).as_posix())
+    if legacy and not llm_config_path.exists():
+        llm_config_path = PRESET_DIR / f"{legacy}.yaml"
     if not llm_config_path.exists():
         raise FileNotFoundError(f"LLM config file not found: {llm_config_path}")
 

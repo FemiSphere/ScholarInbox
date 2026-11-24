@@ -191,3 +191,34 @@ def test_openai_compatible_records_usage_and_transport_retry(monkeypatch):
     assert metrics.llm_requests[1].retry is True
     assert metrics.llm_requests[1].total_tokens == 14
     assert metrics.llm_requests[1].cache_hit_tokens == 3
+
+
+def test_llm_preset_is_loaded_and_inline_keys_override_it(tmp_path):
+    from literature_digest.config import load_config
+
+    config_path = tmp_path / "config.local.yaml"
+    config_path.write_text(
+        'llm:\n  preset: deepseek\n  openai_compatible:\n    temperature: 0.1\n', encoding="utf-8")
+    config = load_config(config_path)
+    assert config["llm"]["provider"] == "openai_compatible"
+    assert config["llm"]["openai_compatible"]["base_url"] == "https://api.deepseek.com"
+    assert config["llm"]["openai_compatible"]["temperature"] == 0.1
+    assert config["llm"]["operation_settings"]["paper_ranking"]["thinking"] == "enabled"
+
+
+def test_unknown_preset_is_reported(tmp_path):
+    import pytest
+    from literature_digest.config import load_config
+
+    config_path = tmp_path / "config.local.yaml"
+    config_path.write_text("llm:\n  preset: nope\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="available"):
+        load_config(config_path)
+
+
+def test_legacy_example_config_path_maps_to_packaged_preset(tmp_path):
+    from literature_digest.config import load_config
+
+    config_path = tmp_path / "config.local.yaml"
+    config_path.write_text('llm:\n  config_path: "config/llm/codex_cli.example.yaml"\n', encoding="utf-8")
+    assert load_config(config_path)["llm"]["provider"] == "codex_cli"

@@ -80,10 +80,11 @@ class ProgressReporter:
             path.parent.mkdir(parents=True, exist_ok=True)
             self._log_handle = path.open("a", encoding="utf-8")
 
-    def banner(self, *, provider: str, mode: str, show_banner: bool = True) -> None:
-        metadata = f"{APP_AUTHOR} · v{__version__}"
+    def banner(self, *, provider: str, mode: str, show_banner: bool = True, display_name: str = "") -> None:
+        metadata = _banner_metadata(display_name)
         if self.enabled and show_banner:
-            self._banner_view = _ShimmerBanner(self.console, provider, mode, animated=self._interactive)
+            self._banner_view = _ShimmerBanner(self.console, provider, mode, animated=self._interactive,
+                                               metadata=metadata)
             if self._interactive:
                 self._live = Live(get_renderable=self._live_renderable, console=self.console,
                     refresh_per_second=8, transient=False, vertical_overflow="crop")
@@ -230,6 +231,12 @@ class ProgressReporter:
             self._log_handle.flush()
 
 
+def _banner_metadata(display_name: str) -> str:
+    """Banner subtitle: the configured ui.display_name (if any) and the version."""
+    name = (display_name or "").strip()
+    return f"{name} · v{__version__}" if name else f"v{__version__}"
+
+
 def _hex_rgb(value: str) -> tuple[int, int, int]:
     cleaned = value.lstrip("#")
     return tuple(int(cleaned[index : index + 2], 16) for index in (0, 2, 4))  # type: ignore[return-value]
@@ -238,8 +245,9 @@ def _hex_rgb(value: str) -> tuple[int, int, int]:
 class _ShimmerBanner:
     """A time-based renderable refreshed by the same Live surface as progress."""
 
-    def __init__(self, console: Console, provider: str, mode: str, *, animated: bool):
+    def __init__(self, console: Console, provider: str, mode: str, *, animated: bool, metadata: str = ""):
         self.console = console
+        self.metadata = metadata or _banner_metadata("")
         self.provider = provider
         self.mode = mode
         self.animated = animated
@@ -261,7 +269,7 @@ class _ShimmerBanner:
                 Align.center(_shimmer_text(logo, phase)),
                 Text(""),
                 Align.center(Text(APP_QUOTE, style="bold #dbeafe")),
-                Align.right(Text(f"{APP_AUTHOR} · v{__version__}", style="dim")),
+                Align.right(Text(self.metadata, style="dim")),
             ), border_style=border, padding=(1, 2), expand=True),
             Align.center(Text(f"{self.provider} · {self.mode}", style="dim")),
             Text(""),

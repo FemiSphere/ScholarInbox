@@ -1,9 +1,15 @@
-# 科研文献摘要主配置模板
+# ScholarInbox 配置参考
 #
-# 使用方法：
-# 1. 复制本文件为 config.local.yaml。
-# 2. 只在 config.local.yaml 中修改本地真实配置。
-# 3. 不要提交 config.local.yaml、credentials.json、token.json、.env、data/、outputs/。
+# 推荐用 `scholar-inbox init` 生成精简的 config.local.yaml；本文件列出全部可选项及默认值，
+# 只需把要改的键写进 config.local.yaml（未写的键使用程序内置默认值）。
+#
+# 最常改的几项：
+#   llm.preset                选择模型：deepseek（推荐）/ openai_compatible / codex_cli
+#   gmail.max_emails_per_run  单次处理邮件数
+#   gmail.mark_as_read        正式运行成功后是否标为已读
+#   digest.max_*              每个相关性级别最多展示多少篇
+#
+# 不要提交 config.local.yaml、credentials.json、token.json、.env、research_interests.md、data/、outputs/。
 
 gmail:
   # Gmail 搜索语法。默认读取所有未读邮件。
@@ -43,10 +49,14 @@ gmail:
   batch_modify_size: 1000
 
 llm:
-  # 主配置只选择一个 LLM 配置文件。
-  # 默认使用 Codex CLI；如需切换 DeepSeek，请改为：
-  # config_path: "config/llm/deepseek.local.yaml"
-  config_path: "config/llm/codex_cli.example.yaml"
+  # 内置预设（literature_digest/presets/）：deepseek / openai_compatible / codex_cli。
+  # DeepSeek 需在项目根目录 .env 中写 DEEPSEEK_API_KEY=你的 key。
+  preset: "deepseek"
+  # 需要覆盖预设时，直接在这里写对应的键，例如：
+  # openai_compatible:
+  #   temperature: 0.1
+  # 进阶：也可用 config_path 指向一份完整的外部 LLM 配置文件（会覆盖以上设置）。
+  # config_path: "config/llm/my-llm.local.yaml"
 
 research_interests:
   # 用自然语言维护近期研究兴趣。排序优先级默认来自这个文档。
@@ -131,6 +141,8 @@ progress:
 ui:
   # 交互终端显示 Rich 大标题和动态进度；重定向或非 TTY 自动降级。
   banner_enabled: true
+  # 可选：终端横幅中显示的名字，留空只显示版本号。
+  display_name: ""
   color_enabled: true
 
 telemetry:

@@ -32,6 +32,9 @@ literature-digest = "literature_digest.cli:main"
 [tool.setuptools.packages.find]
 include = ["literature_digest*"]
 
+[tool.setuptools.package-data]
+literature_digest = ["presets/*.yaml"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
