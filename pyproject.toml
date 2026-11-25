@@ -5,6 +5,7 @@ description = "Turn academic alert emails into personalized literature digests."
 authors = [
   { name = "马心远" },
 ]
+license = { text = "MIT" }
 requires-python = ">=3.12"
 dependencies = [
   # Gmail API, OAuth and proxy transport.

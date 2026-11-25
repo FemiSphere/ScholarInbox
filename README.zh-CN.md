@@ -15,6 +15,7 @@
   <img alt="版本 0.3.0" src="https://img.shields.io/badge/version-0.3.0-2bbf9a?style=flat-square">
   <a href="https://github.com/FemiSphere/ScholarInbox/actions/workflows/tests.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/FemiSphere/ScholarInbox/tests.yml?branch=master&label=tests&style=flat-square"></a>
   <img alt="本地运行" src="https://img.shields.io/badge/runs-locally-ff9f2e?style=flat-square">
+  <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/badge/license-MIT-ff5f87?style=flat-square"></a>
 </p>
 
 </div>
@@ -236,6 +237,8 @@ tests/                          离线测试
 ```
 
 欢迎提出建议或贡献代码，可以开 issue 或 pull request。修改代码前请先阅读 [`AGENTS.md`](AGENTS.md) 和 [代码地图](docs/code-map.md)，提交前运行 `python -B -m pytest -q`。
+
+本项目以 [MIT 许可证](LICENSE) 开源。
 
 <div align="center">
 <br>

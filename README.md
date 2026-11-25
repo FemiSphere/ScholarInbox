@@ -14,6 +14,7 @@
   <img alt="Version 0.3.0" src="https://img.shields.io/badge/version-0.3.0-2bbf9a?style=flat-square">
   <a href="https://github.com/FemiSphere/ScholarInbox/actions/workflows/tests.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/FemiSphere/ScholarInbox/tests.yml?branch=master&label=tests&style=flat-square"></a>
   <img alt="Runs locally" src="https://img.shields.io/badge/runs-locally-ff9f2e?style=flat-square">
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-ff5f87?style=flat-square"></a>
 </p>
 
 </div>
@@ -231,6 +232,8 @@ tests/                          offline test suite
 ```
 
 Ideas and contributions are welcome — open an issue or a pull request. If you change the code, start with [`AGENTS.md`](AGENTS.md) and the [code map](docs/code-map.md), and run `python -B -m pytest -q` before submitting.
+
+Released under the [MIT License](LICENSE).
 
 <div align="center">
 <br>

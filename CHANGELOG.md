@@ -28,6 +28,7 @@ A large usability release: better papers, a better page, a calmer terminal and a
 - Terminal: static header, one line per finished step, single-line progress, end-of-run summary
   with remaining unread mail. Run logs older than 30 days are cleaned up.
 - English README with screenshots and a live demo; Chinese README in `README.zh-CN.md`.
+- Released under the MIT License.
 
 ### Upgrading from 0.2
 - Existing `llm.config_path` setups keep working; `config/llm/*.example.yaml` paths map to presets.
