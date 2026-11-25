@@ -1,172 +1,159 @@
-# ScholarInbox 配置参考
+# ╭──────────────────────────────────────────────────────────────────────────╮
+# │  ScholarInbox · configuration reference / 配置参考                       │
+# ╰──────────────────────────────────────────────────────────────────────────╯
 #
-# 推荐用 `scholar-inbox init` 生成精简的 config.local.yaml；本文件列出全部可选项及默认值，
-# 只需把要改的键写进 config.local.yaml（未写的键使用程序内置默认值）。
+# Quick start / 快速开始
+#   `scholar-inbox init` writes a short config.local.yaml for you. Every key in this
+#   file is optional and shows its built-in default — copy only what you want to change.
+#   运行 `scholar-inbox init` 会生成精简的 config.local.yaml。下面每一项都可省略，
+#   示例值即程序默认值；只需把想改的项写进 config.local.yaml。
 #
-# 最常改的几项：
-#   llm.preset                选择模型：deepseek（推荐）/ openai_compatible / codex_cli
-#   gmail.max_emails_per_run  单次处理邮件数
-#   gmail.mark_as_read        正式运行成功后是否标为已读
-#   digest.max_*              每个相关性级别最多展示多少篇
-#
-# 不要提交 config.local.yaml、credentials.json、token.json、.env、research_interests.md、data/、outputs/。
+# Most people only touch section 1. / 大多数人只需要看第 1 部分。
+# Never commit: config.local.yaml, .env, credentials.json, token.json, research_interests.md
 
-gmail:
-  # Gmail 搜索语法。默认读取所有未读邮件。
-  query: "is:unread"
 
-  # 单次最多读取多少封邮件。积压很多时建议先 30-50 封分批处理。
-  max_emails_per_run: 50
-
-  # 是否在成功处理后把邮件标记为已读。测试阶段建议 false。
-  mark_as_read: false
-
-  # 是否包含 Gmail spam/trash。通常保持 false。
-  include_spam_trash: false
-
-  # Google OAuth Desktop Client 下载得到的凭据文件。
-  credentials_path: "credentials.json"
-
-  # 首次授权后自动生成。不要手动填写，不要提交到 git。
-  token_path: "token.json"
-
-  # Gmail API 单次网络请求超时秒数。网络不稳定或代理较慢时可适当调大。
-  request_timeout_seconds: 30
-
-  # 可选：显式为 Gmail API 设置代理。留空时自动读取 shell 环境变量。
-  # 示例："http://127.0.0.1:7897"
-  proxy_url: ""
-
-  # Gmail batch 会并发执行子请求；过大容易触发 per-user concurrent request 429。
-  # 设为 1 可关闭 Gmail batch。
-  batch_fetch_size: 10
-
-  # 仅重试 429、5xx 和临时网络错误；永久错误不会静默跳过。
-  batch_fetch_max_retries: 3
-  batch_fetch_retry_backoff_seconds: 1.0
-
-  # Gmail batchModify 单次最多处理 1000 封；不影响 dry-run 边界。
-  batch_modify_size: 1000
+# ═══════════════════════════════ 1 · ESSENTIALS / 基础设置 ═══════════════════════════════
 
 llm:
-  # 内置预设（literature_digest/presets/）：deepseek / openai_compatible / codex_cli。
-  # DeepSeek 需在项目根目录 .env 中写 DEEPSEEK_API_KEY=你的 key。
+  # Which AI model reads and ranks your papers. / 用哪个模型来阅读和评级论文
+  #   deepseek           recommended, low cost; put DEEPSEEK_API_KEY=... in .env
+  #   openai_compatible  any OpenAI-style API; also set base_url / model / api_key_env below
+  #   codex_cli          uses a logged-in local `codex` command, no API key
   preset: "deepseek"
-  # 需要覆盖预设时，直接在这里写对应的键，例如：
+  # Override any preset value here, e.g. / 可在此覆盖预设，例如：
   # openai_compatible:
-  #   temperature: 0.1
-  # 进阶：也可用 config_path 指向一份完整的外部 LLM 配置文件（会覆盖以上设置）。
-  # config_path: "config/llm/my-llm.local.yaml"
+  #   base_url: "https://api.example.com/v1"
+  #   model: "my-model"
+  #   api_key_env: "OPENAI_API_KEY"
 
-research_interests:
-  # 用自然语言维护近期研究兴趣。排序优先级默认来自这个文档。
-  path: "research_interests.md"
-  # false 时按兴趣文件内容和模型配置哈希复用画像缓存。
-  refresh_each_run: false
-  cache_path: "data/cache/research_interests.json"
-
-filtering:
-  skip_promotional: true
-  audit_skipped_emails: true
-  # 被判为推广而跳过的邮件默认保持未读，会在每次运行中重复出现并占用读取名额。
-  # 设为 true 时，正式运行成功后与已处理邮件一起标为已读（日报中仍列出，便于核对）。
-  mark_skipped_as_read: false
-  # Google Scholar 快讯发件人已内置信任，无需加入此列表。
-  academic_sender_allowlist: []
-  sender_blocklist: []
-  promotional_keywords:
-    - sale
-    - webinar
-    - discount
-    - offer
-    - unsubscribe
-    - sponsored
-    - marketing
-
-parsing:
-  cache_enabled: true
-  cache_dir: "data/cache/email_parsing"
-  save_toc_images: true
-  toc_image_dir: "data/toc_images"
-  max_images_per_email: 20
-  fuzzy_title_threshold: 92
-  # 非 Google Scholar 的出版社/期刊/RSS 邮件，先用快速 LLM 抽取结构化论文条目。
-  llm_structure_non_scholar: true
-
-deduplication:
-  # 使用轻量 JSON 身份索引进行跨日期去重；文件位于已忽略的 data/。
-  registry_enabled: true
-  registry_path: "data/paper_registry.json"
-  # 只保留最近 30 天内再次出现过的论文，避免索引持续增长。
-  retention_days: 30
-  # 历史模糊匹配比单次运行更保守，并带有长度、token 和数字保护。
-  fuzzy_title_threshold: 94
-  # 第一次启用时，从最近 30 天的 Markdown digest 回填身份索引。
-  bootstrap_from_outputs: true
+gmail:
+  # How many unread emails to process per run. / 每次处理多少封未读邮件
+  max_emails_per_run: 50
+  # Mark processed emails as read after a successful real run (never deletes mail).
+  # 正式运行成功后把已处理邮件标为已读（程序从不删除邮件）。确认流程正常后再开启。
+  mark_as_read: false
+  # Which emails to read, in Gmail search syntax. / 读取哪些邮件（Gmail 搜索语法）
+  query: "is:unread"
+  # advanced / 高级
+  credentials_path: "credentials.json"   # OAuth client file from Google Cloud / OAuth 凭据文件
+  token_path: "token.json"               # created on first authorisation / 首次授权后自动生成
+  proxy_url: ""                          # e.g. "http://127.0.0.1:7897"; empty = system proxy / 留空用系统代理
+  request_timeout_seconds: 30
+  include_spam_trash: false
+  batch_fetch_size: 10
+  batch_fetch_max_retries: 3
+  batch_fetch_retry_backoff_seconds: 1.0
+  batch_modify_size: 1000
 
 digest:
-  output_dir: "outputs"
-  # 默认只输出 HTML。需要 Markdown 时改为 ["html", "md"]。
-  output_formats: ["html"]
-  # HTML 阅读版式：pop（波普）/ bauhaus（色块）/ riso（印刷）/ fresh（清新）。页面底部也可随时切换，选择会记在浏览器里。
-  theme: "pop"
-  # 正式运行成功后，按文件名日期删除超过 60 天的 MD/HTML 日报。
-  cleanup_old_outputs: false
-  # false 时，同一天多次运行不会覆盖已有 digest，而是自动追加 -2、-3。
-  overwrite_existing: false
-  include_low_relevance: true
-  # 学术论文但不属于研究大方向的归入“领域外”；HTML 中默认折叠，只显示标题。
-  include_off_topic: true
-  # 非学术推广或错误提取内容会归入“不相关”；HTML 中默认折叠。
-  include_irrelevant: true
-  language: "zh-CN"
-  # 各级别最多展示的篇数（null 为不限制）。超出部分已评级但不展示、不翻译，日报“运行提示”会列出
-  # 被隐藏的数量；这些论文仍写入去重索引，之后不会再出现。低相关等只翻译标题，放开上限成本很低。
+  # Reading style of the HTML digest (switchable in the page footer too).
+  # HTML 阅读版式（页面底部也可随时切换）
+  #   bright / 明亮:     fresh 清新 · pop 波普 · bauhaus 色块 · riso 印刷
+  #   academic / 学术:   editorial 期刊 · swiss 极简 · calm 宁静
+  theme: "fresh"
+  # How many papers to show per level; null = no limit. Hidden papers are noted in the digest.
+  # 每个级别最多展示多少篇，null 为不限制；被隐藏的数量会在日报“运行提示”中说明。
   max_high_relevance: 20
   max_medium_relevance: 30
-  max_low_relevance: 80
-  # null 表示不限制；领域外只占一行标题。
+  max_low_relevance: null
   max_off_topic: null
   max_irrelevant: 80
+  # output / 输出
+  output_dir: "outputs"            # where digests are written / 日报保存目录
+  output_formats: ["html"]         # add "md" for a Markdown copy / 加 "md" 同时输出 Markdown
+  cleanup_old_outputs: false       # delete digests older than 60 days after a real run / 正式运行后清理 60 天前的日报
+  overwrite_existing: false        # false: a second run on the same day writes -2, -3 / 同日多次运行追加 -2、-3
+  include_low_relevance: true      # show the 低相关 list / 展示低相关
+  include_off_topic: true          # show the folded 领域外 list / 展示折叠的领域外
+  include_irrelevant: true         # show the folded 不相关 list / 展示折叠的不相关
 
-safety:
-  dry_run_default: true
-  never_delete_emails: true
-  redact_secrets_in_logs: true
-  allow_sample_without_credentials: true
-  allow_offline_llm_for_sample: true
-
-progress:
-  enabled: true
-  show_timestamps: true
+research_interests:
+  # Your research interests in plain language — this drives every ranking decision.
+  # Start from research_interests.example.md. The "broad fields" section decides
+  # which papers are folded away as off-topic.
+  # 用自然语言写的研究兴趣，是所有评级的依据；“大方向”一节决定哪些论文折叠为领域外。
+  path: "research_interests.md"
+  # advanced / 高级
+  refresh_each_run: false          # true: rebuild the interest profile every run / 每次重新生成兴趣画像
+  cache_path: "data/cache/research_interests.json"
 
 ui:
-  # 交互终端显示 Rich 大标题和动态进度；重定向或非 TTY 自动降级。
-  banner_enabled: true
-  # 可选：终端横幅中显示的名字，留空只显示版本号。
+  # Name shown in the terminal header; empty shows only the version. / 终端标题中显示的名字
   display_name: ""
-  color_enabled: true
+  banner_enabled: true             # show the header / 显示终端标题
+  color_enabled: true              # colours and live progress / 彩色与动态进度
+
+
+# ═══════════════════════════ 2 · EMAIL FILTERING / 邮件筛选 ═══════════════════════════
+
+filtering:
+  # Skip obvious marketing emails (listed at the bottom of the digest for checking).
+  # 跳过明显的推广邮件（日报底部会列出，便于核对）。Google Scholar alerts are always kept.
+  skip_promotional: true
+  # Also mark skipped emails as read, so they stop reappearing. / 被跳过的邮件也标为已读
+  mark_skipped_as_read: false
+  # Senders that are always academic / always skipped (substring match).
+  # 始终视为学术 / 始终跳过的发件人（包含匹配）
+  academic_sender_allowlist: []
+  sender_blocklist: []
+  # Whole-word keywords that suggest marketing. / 判断推广邮件的关键词（整词匹配）
+  promotional_keywords: ["sale", "webinar", "discount", "offer", "unsubscribe", "sponsored", "marketing"]
+  # advanced / 高级
+  audit_skipped_emails: true         # list skipped emails in the digest / 在日报中列出被跳过的邮件
+
+
+# ══════════════════════ 3 · ABSTRACTS FOR TOP PAPERS / 高相关论文摘要补充 ══════════════════════
+
+web_enrichment:
+  # Fetch the original abstract for high/medium papers, then re-rate them with it.
+  # Order: arXiv → free Crossref/OpenAlex (sends only DOI + title) → DeepSeek Search as fallback.
+  # Runs with the DeepSeek preset; failures simply keep the first rating.
+  # 为高/中相关论文获取原始摘要并据此复评。顺序：arXiv → 免费的 Crossref/OpenAlex
+  # （只发送 DOI 与标题）→ DeepSeek 搜索兜底。仅 DeepSeek 预设启用；失败时保留初评。
+  enabled: true
+  max_papers: 50                     # covers all shown high + medium papers / 覆盖全部展示的高、中相关
+  metadata_sources_enabled: true     # free Crossref / OpenAlex lookups / 免费元数据查询
+  # advanced / 高级
+  metadata_timeout_seconds: 10
+  metadata_max_requests: 300
+  max_requests: 80                   # paid Search/Fetch requests per run / 每次运行的付费请求上限
+  max_workers: 3
+  budget_seconds: 480                # whole enrichment step incl. re-rating / 摘要补充与复评总时长
+  retrieval_budget_seconds: 360
+  paper_budget_seconds: 60
+  request_timeout_seconds: 40
+  search_timeout_seconds: 12
+  max_retries: 0
+  cache_enabled: true
+  cache_path: "data/cache/web_evidence.sqlite3"
+  cache_max_entries: 300
+  cache_max_bytes: 8388608
+  cache_ttl_days: 30
+
+
+# ═════════════════════════ 4 · TERMINAL & LOGS / 终端与日志 ═════════════════════════
+
+progress:
+  enabled: true                      # live progress in the terminal / 终端实时进度
+  show_timestamps: true              # timestamps in plain (non-interactive) output / 纯文本输出带时间
 
 telemetry:
-  # 终端只显示汇总；逐请求耗时、token 和缓存命中保存到独立日志。
-  detailed_log_enabled: true
+  log_retention_days: 30             # delete run logs older than this; 0 keeps all / 日志保留天数，0 为全部保留
+  # advanced / 高级
+  detailed_log_enabled: true         # per-request timings & tokens in logs/metrics / 逐请求指标
   log_dir: "logs/metrics"
-  # 每次运行结束后删除文件名日期超过 N 天的运行日志与请求指标；0 表示全部保留。
-  log_retention_days: 30
-  show_compact_summary: true
+
+
+# ══════════════════ 5 · ADVANCED — usually leave as is / 高级（通常无需修改） ══════════════════
 
 performance:
-  # 整次运行预算；0 关闭。到期取消后续请求，保留缓存和指标。
-  run_timeout_seconds: 900
-  # LLM 请求有限并发；遇到限流可降为 2，设为 1 可恢复串行。
-  parsing_max_workers: 3
+  run_timeout_seconds: 900           # stop waiting after this many seconds; 0 = off / 整次运行等待上限
+  parsing_max_workers: 3             # parallel requests; lower to 2 if you hit rate limits / 并发数，遇到限流可降为 2
   ranking_max_workers: 3
-  # 每批相关性分析论文数。
-  ranking_batch_size: 10
-  separate_translation: true
+  ranking_batch_size: 10             # papers per rating request / 每次评级请求的论文数
+  separate_translation: true         # translate after rating (only shown papers) / 评级后单独翻译（只翻译展示的论文）
   ranking_abstract_max_chars: 2000
-  # 非 Scholar 邮件每个分块的上限；整封邮件不会仅截取前 N 字符。
-  email_text_max_chars: 12000
+  email_text_max_chars: 12000        # long journal emails are split into chunks of this size / 长邮件分块大小
   email_max_chunk_items: 8
   email_max_split_depth: 4
   email_max_requests_per_email: 32
@@ -174,25 +161,31 @@ performance:
   email_max_links: 50
   email_max_images: 20
 
-# 高/中相关论文补充摘要，失败保留初筛；仅 DeepSeek 正式运行启用。
-web_enrichment:
+result_cache:
+  # Reuses successful ratings/translations if a run has to be repeated; cleared after a
+  # successful real run. / 重跑时复用已成功的评级与翻译；正式运行成功后自动清空。
   enabled: true
-  # 覆盖全部展示的高/中相关论文（默认 20 + 30）。
-  max_papers: 50
-  # 先查免费的 Crossref / OpenAlex（只发送 DOI 与标题，不带个人信息），拿不到再用 DeepSeek Search/Fetch。
-  metadata_sources_enabled: true
-  metadata_timeout_seconds: 10
-  metadata_max_requests: 300
-  max_requests: 80
-  max_workers: 3
-  budget_seconds: 480
-  paper_budget_seconds: 60
-  max_retries: 0
-  retrieval_budget_seconds: 360
-  request_timeout_seconds: 40
-  search_timeout_seconds: 12
-  cache_enabled: true
-  cache_path: "data/cache/web_evidence.sqlite3"
-  cache_max_entries: 300
-  cache_max_bytes: 8388608
-  cache_ttl_days: 30
+  path: "data/cache/results.sqlite3"
+  ttl_days: 7
+  max_entries: 5000
+
+parsing:
+  cache_enabled: true                # remember successfully parsed emails / 缓存已解析邮件
+  cache_dir: "data/cache/email_parsing"
+  llm_structure_non_scholar: true    # use the model to read journal / publisher emails / 用模型解析期刊邮件
+  save_toc_images: true              # keep table-of-contents images for the digest / 保存目录图片
+  toc_image_dir: "data/toc_images"
+  max_images_per_email: 20
+  fuzzy_title_threshold: 92
+
+deduplication:
+  registry_enabled: true             # skip papers already seen in the last N days / 跨日期去重
+  registry_path: "data/paper_registry.json"
+  retention_days: 30
+  fuzzy_title_threshold: 94
+  bootstrap_from_outputs: true
+
+safety:
+  dry_run_default: true              # without --no-dry-run, never change Gmail / 未加 --no-dry-run 时不修改邮箱
+  allow_sample_without_credentials: true
+  allow_offline_llm_for_sample: true

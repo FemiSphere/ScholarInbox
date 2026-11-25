@@ -115,10 +115,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # HTML reading style. Bright: fresh, pop, bauhaus, riso. Academic: editorial, swiss, calm.
         "theme": "fresh",
         "cleanup_old_outputs": False,
+        "overwrite_existing": False,
         "include_low_relevance": True,
         "include_off_topic": True,
         "include_irrelevant": True,
-        "language": "zh-CN",
         "max_high_relevance": 20,
         "max_medium_relevance": 30,
         "max_off_topic": None,
@@ -126,8 +126,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "safety": {
         "dry_run_default": True,
-        "never_delete_emails": True,
-        "redact_secrets_in_logs": True,
         "allow_sample_without_credentials": True,
         "allow_offline_llm_for_sample": True,
     },
@@ -145,7 +143,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "log_dir": "logs/metrics",
         # Run logs and request metrics older than this many days are deleted after each run; 0 keeps all.
         "log_retention_days": 30,
-        "show_compact_summary": True,
     },
     "performance": {
         "run_timeout_seconds": 900,

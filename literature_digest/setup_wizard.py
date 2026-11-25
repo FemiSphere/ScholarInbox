@@ -84,7 +84,7 @@ def run_init(argv: list[str] | None = None, *, ask: Callable[[str], str] = input
             *llm_lines,
             "",
             "digest:",
-            '  output_formats: ["html"]',
+            '  theme: "fresh"                 # fresh · pop · bauhaus · riso · editorial · swiss · calm',
             "",
             "ui:",
             f'  display_name: "{name}"',

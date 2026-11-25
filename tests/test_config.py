@@ -222,3 +222,22 @@ def test_legacy_example_config_path_maps_to_packaged_preset(tmp_path):
     config_path = tmp_path / "config.local.yaml"
     config_path.write_text('llm:\n  config_path: "config/llm/codex_cli.example.yaml"\n', encoding="utf-8")
     assert load_config(config_path)["llm"]["provider"] == "codex_cli"
+
+
+def test_config_template_documents_every_default_and_changes_nothing():
+    """Copying config.example.yaml verbatim must behave exactly like the built-in defaults."""
+    from pathlib import Path
+
+    import yaml
+
+    from literature_digest.config import DEFAULT_CONFIG
+
+    template = yaml.safe_load((Path(__file__).resolve().parents[1] / "config.example.yaml").read_text(encoding="utf-8"))
+    for section, defaults in DEFAULT_CONFIG.items():
+        if section == "llm":
+            continue
+        assert section in template, f"section {section} missing from config.example.yaml"
+        for key, value in defaults.items():
+            assert key in template[section], f"{section}.{key} missing from config.example.yaml"
+            assert template[section][key] == value, f"{section}.{key}: template {template[section][key]!r} != default {value!r}"
+    assert set(template) - set(DEFAULT_CONFIG) == set(), "template has sections the program does not read"
