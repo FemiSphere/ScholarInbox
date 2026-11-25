@@ -3,7 +3,7 @@
 <img src="docs/assets/banner.svg" alt="ScholarInbox：把学术提醒邮件，变成一份赏心悦目的每日阅读清单" width="100%">
 
 <p>
-  <a href="https://raw.githack.com/FemiSphere/ScholarInbox/master/examples/sample-digest.html"><b>✦ 在线样例</b></a>
+  <a href="https://femisphere.github.io/ScholarInbox/examples/sample-digest.html"><b>✦ 在线样例</b></a>
   &nbsp;·&nbsp; <a href="README.md">English</a>
   &nbsp;·&nbsp; <a href="#-五步上手">五步上手</a>
   &nbsp;·&nbsp; <a href="#-七套阅读版式">阅读版式</a>
@@ -88,7 +88,7 @@
 </tr>
 </table>
 
-👉 **[打开在线样例](https://raw.githack.com/FemiSphere/ScholarInbox/master/examples/sample-digest.html)**：一份真实的 83 篇论文日报，可在页面底部切换版式。
+👉 **[打开在线样例](https://femisphere.github.io/ScholarInbox/examples/sample-digest.html)**：一份真实的 83 篇论文日报，可在页面底部切换版式。
 
 ## 🔄 工作流程
 

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The live demo is now hosted on GitHub Pages: https://femisphere.github.io/ScholarInbox/examples/sample-digest.html
 - Everything stays inside the project folder: the CLI anchors itself there even when started
   elsewhere (`SCHOLAR_INBOX_HOME` overrides; `.` = current directory).
 - Digest cleanup (60 days) is on by default and also removes old TOC images; parse-cache files are

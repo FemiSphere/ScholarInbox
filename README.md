@@ -3,7 +3,7 @@
 <img src="docs/assets/banner.svg" alt="ScholarInbox — your academic alert emails, turned into a beautiful daily reading list" width="100%">
 
 <p>
-  <a href="https://raw.githack.com/FemiSphere/ScholarInbox/master/examples/sample-digest.html"><b>✦ Live demo</b></a>
+  <a href="https://femisphere.github.io/ScholarInbox/examples/sample-digest.html"><b>✦ Live demo</b></a>
   &nbsp;·&nbsp; <a href="README.zh-CN.md">中文说明</a>
   &nbsp;·&nbsp; <a href="#-get-started-in-five-steps">Get started</a>
   &nbsp;·&nbsp; <a href="#-seven-reading-styles">Reading styles</a>
@@ -87,7 +87,7 @@ Pick one in your settings, or switch any time from the footer of a digest. Your 
 </tr>
 </table>
 
-👉 **[Open the live demo](https://raw.githack.com/FemiSphere/ScholarInbox/master/examples/sample-digest.html)** — a real 83-paper digest; try the style switcher at the bottom.
+👉 **[Open the live demo](https://femisphere.github.io/ScholarInbox/examples/sample-digest.html)** — a real 83-paper digest; try the style switcher at the bottom.
 
 ## 🔄 How it works
 
