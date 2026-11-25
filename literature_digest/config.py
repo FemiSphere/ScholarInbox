@@ -112,8 +112,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "digest": {
         "output_dir": "outputs",
         "output_formats": ["html"],
-        # HTML reading style: editorial (期刊) / swiss (极简) / calm (宁静); switchable in the page footer.
-        "theme": "editorial",
+        # HTML reading style: pop (波普) / bauhaus (色块) / riso (印刷) / fresh (清新); switchable in the footer.
+        "theme": "pop",
         "cleanup_old_outputs": False,
         "include_low_relevance": True,
         "include_off_topic": True,

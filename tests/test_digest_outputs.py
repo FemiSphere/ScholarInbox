@@ -193,10 +193,10 @@ def test_reading_themes_default_from_config_and_are_switchable(tmp_path):
     run = DigestRun(date_label="2026-11-25", stats=RunStats(), interest_profile=InterestProfile(summary_zh="测试"),
                     papers=[_ranked("Pentagonal COF", "high", .9)])
     default = render_html(run)
-    assert '<html lang="zh-CN" data-theme="editorial">' in default
-    assert '<html lang="zh-CN" data-theme="calm">' in render_html(run, theme="calm")
-    assert '<html lang="zh-CN" data-theme="editorial">' in render_html(run, theme="unknown")
-    for key in ("editorial", "swiss", "calm"):
+    assert '<html lang="zh-CN" data-theme="pop">' in default
+    assert '<html lang="zh-CN" data-theme="riso">' in render_html(run, theme="riso")
+    assert '<html lang="zh-CN" data-theme="pop">' in render_html(run, theme="unknown")
+    for key in ("pop", "bauhaus", "riso", "fresh"):
         assert f'data-theme-choice="{key}"' in default
     # stored choice is applied in <head>, before first paint (no theme flash)
     assert default.index("scholarinbox:theme") < default.index("<style>")

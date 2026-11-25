@@ -108,8 +108,8 @@ digest:
   output_dir: "outputs"
   # 默认只输出 HTML。需要 Markdown 时改为 ["html", "md"]。
   output_formats: ["html"]
-  # HTML 阅读版式：editorial（期刊）/ swiss（极简）/ calm（宁静）。页面底部也可临时切换，选择会记在浏览器里。
-  theme: "editorial"
+  # HTML 阅读版式：pop（波普）/ bauhaus（色块）/ riso（印刷）/ fresh（清新）。页面底部也可随时切换，选择会记在浏览器里。
+  theme: "pop"
   # 正式运行成功后，按文件名日期删除超过 60 天的 MD/HTML 日报。
   cleanup_old_outputs: false
   # false 时，同一天多次运行不会覆盖已有 digest，而是自动追加 -2、-3。
