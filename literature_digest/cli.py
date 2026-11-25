@@ -465,6 +465,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         output_dir,
         formats=list(config["digest"]["output_formats"]),
         overwrite_existing=bool(config["digest"].get("overwrite_existing", True)),
+        theme=str(config["digest"].get("theme", "editorial")),
     )
 
     if registry is not None and not dry_run and not fallback_count:

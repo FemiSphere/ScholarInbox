@@ -21,10 +21,10 @@
 | HTTP 等待、重试、JSON/length、操作模式 | `llm/openai_compatible.py:OpenAICompatibleClient`、`llm/base.py` | `test_api_resilience.py`、`test_api_output_validation.py`、`test_operation_settings.py` |
 | Codex CLI 后端/离线 stub | `llm/codex_cli.py`、`llm/offline_stub.py` | `test_performance.py`、`test_ranking_and_digest.py` |
 | 并发/取消/阶段预算 | `concurrency.py:cooperative_map`、`llm/base.py:llm_time_budget`、`cli.py:main` | `test_concurrency.py`、`test_api_resilience.py`、`test_enrichment_pipeline.py` |
-| HTML/MD、论文详情、图片、来源链接 | `digest.py:write_digests/render_html/_render_paper_card`；页面样式与交互（已读/收藏、动效、导出）在 `digest_assets.py` | `test_digest_outputs.py`、`test_ranking_and_digest.py`、`test_ranking_evidence.py` |
+| HTML/MD、论文详情、图片、来源链接 | `digest.py:write_digests/render_html/_render_paper_card`；页面样式（三套版式 editorial/swiss/calm，`digest.theme` 选择默认值）与交互（已读/收藏、导出、版式切换）在 `digest_assets.py` | `test_digest_outputs.py`、`test_ranking_and_digest.py`、`test_ranking_evidence.py` |
 | 评级/翻译结果缓存、截断后翻译 | `result_cache.py:ResultCache`、`cli.py:_open_result_cache/_translate_displayed` | `test_result_cache.py` |
 | 日志保留期、剩余未读提示 | `housekeeping.py:prune_old_logs`、`cli.py:_prune_logs/_remaining_unread_note` | `test_housekeeping.py` |
-| 横幅、进度条、OSC 8、纯文本日志 | `ui.py:ProgressReporter` | `test_ui.py` |
+| 终端标题（静态）、阶段清单、单行进度、结果摘要、OSC 8、纯文本日志 | `ui.py:ProgressReporter/_header` | `test_ui.py` |
 | 请求状态、token/耗时、实时事件 | `telemetry.py:RunMetrics/llm_operation` | `test_live_metrics.py`、`test_performance.py` |
 
 共享类型在 `models.py`：`PaperEntry` 是邮件提取数据；`EvidenceRecord` 是独立核验摘要；`RankedPaper` 组合分析/翻译/证据；`DigestRun` 是渲染输入。不要把联网证据塞进邮件原始字段以免改变解析缓存语义。

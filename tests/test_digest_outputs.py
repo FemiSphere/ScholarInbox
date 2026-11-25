@@ -53,7 +53,7 @@ def test_write_digests_creates_markdown_and_html(tmp_path):
     assert "Journal of Thermal Transport, 2026" in html
     assert "toc.png" in html
     assert "https://example.org/paper" in html
-    assert "英文原题：Thermal conductivity in pentagonal COF nanotubes" in html
+    assert '<span class="k">英文原题：</span>Thermal conductivity in pentagonal COF nanotubes' in html
     assert "naturalWidth <= 4" in html
 
 
@@ -82,7 +82,7 @@ def test_digest_does_not_show_english_title_as_chinese_title(tmp_path):
     assert "中文标题暂未生成" in markdown
     assert "英文原题：Metal-modulated phonon transport in porphyrin-based MOFs" in markdown
     assert "中文标题暂未生成" in html
-    assert "英文原题：Metal-modulated phonon transport in porphyrin-based MOFs" in html
+    assert "Metal-modulated phonon transport in porphyrin-based MOFs" in html
 
 
 def test_write_digests_can_avoid_overwriting_existing_outputs(tmp_path):
@@ -186,3 +186,20 @@ def test_off_topic_papers_are_folded_rows_and_reader_tools_are_present(tmp_path)
         assert marker in html
     ids = re.findall(r'data-id="([0-9a-f]{16})"', html)
     assert len(ids) == 3 and len(set(ids)) == 3
+
+
+def test_reading_themes_default_from_config_and_are_switchable(tmp_path):
+    from literature_digest.digest import render_html
+    run = DigestRun(date_label="2026-11-25", stats=RunStats(), interest_profile=InterestProfile(summary_zh="测试"),
+                    papers=[_ranked("Pentagonal COF", "high", .9)])
+    default = render_html(run)
+    assert '<html lang="zh-CN" data-theme="editorial">' in default
+    assert '<html lang="zh-CN" data-theme="calm">' in render_html(run, theme="calm")
+    assert '<html lang="zh-CN" data-theme="editorial">' in render_html(run, theme="unknown")
+    for key in ("editorial", "swiss", "calm"):
+        assert f'data-theme-choice="{key}"' in default
+    # stored choice is applied in <head>, before first paint (no theme flash)
+    assert default.index("scholarinbox:theme") < default.index("<style>")
+    # scroll flicker sources are gone
+    for removed in ("backdrop-filter", "IntersectionObserver(entries => {\n        for (const entry of entries) if (entry.isIntersecting) { entry.target.classList.add('in')", "drift"):
+        assert removed not in default

@@ -29,6 +29,7 @@ def write_digests(
     formats: list[str] | None = None,
     *,
     overwrite_existing: bool = True,
+    theme: str = "editorial",
 ) -> list[Path]:
     target_dir = Path(output_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -46,7 +47,7 @@ def write_digests(
         html_path = target_dir / f"{stem}.html"
         # The BOM keeps the page readable in viewers that ignore the HTML meta tag
         # when a local file is opened directly. Browsers still treat it as UTF-8.
-        html_path.write_text(render_html(run, target_dir), encoding="utf-8-sig")
+        html_path.write_text(render_html(run, target_dir, theme=theme), encoding="utf-8-sig")
         written.append(html_path)
 
     return written
@@ -159,7 +160,15 @@ def _unique_output_stem(
     raise RuntimeError(f"Could not find an available output filename for {base_stem}")
 
 
-def render_html(run: DigestRun, output_dir: str | Path | None = None) -> str:
+THEMES = {"editorial": "期刊", "swiss": "极简", "calm": "宁静"}
+
+
+def render_html(run: DigestRun, output_dir: str | Path | None = None, *, theme: str = "editorial") -> str:
+    theme = theme if theme in THEMES else "editorial"
+    theme_buttons = "".join(
+        f'<button type="button" data-theme-choice="{key}" aria-pressed="false">{label}</button>'
+        for key, label in THEMES.items()
+    )
     stats = run.stats
     papers_by_level = {
         level: [paper for paper in run.papers if paper.relevance == level]
@@ -175,7 +184,7 @@ def render_html(run: DigestRun, output_dir: str | Path | None = None) -> str:
         if papers_by_level[level]
     )
     hero_tiles = "".join(
-        f'<a href="#sec-{level}"><strong data-count="{counts[level]}">{counts[level]}</strong>'
+        f'<a href="#sec-{level}"><strong>{counts[level]}</strong>'
         f"<span>{RELEVANCE_LABELS[level]}</span></a>"
         for level in RELEVANCE_LEVELS
     )
@@ -198,23 +207,22 @@ def render_html(run: DigestRun, output_dir: str | Path | None = None) -> str:
     interest_summary = escape(run.interest_profile.summary_zh or "未生成研究兴趣摘要。")
 
     return f"""<!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="{theme}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <title>科研文献摘要 - {escape(run.date_label)}</title>
+  <script>try {{ var t = localStorage.getItem('scholarinbox:theme'); if (t) document.documentElement.dataset.theme = t; }} catch (e) {{}}</script>
   <style>{DIGEST_CSS}</style>
 </head>
 <body>
   <div class="progress" id="progress" aria-hidden="true"></div>
-  <header class="hero">
+  <header class="masthead">
     <div class="shell">
-      <div>
-        <p class="kicker">ScholarInbox</p>
-        <h1>科研文献摘要</h1>
-        <p class="subtitle">{escape(run.date_label)} · 共 {len(run.papers)} 条结果</p>
-      </div>
+      <p class="kicker"><span>ScholarInbox</span><span>{escape(run.date_label)}</span></p>
+      <h1>科研文献摘要</h1>
+      <p class="subtitle">本期 {len(run.papers)} 篇 · 来自 {stats.emails_read} 封学术提醒邮件</p>
       <nav class="hero-summary" aria-label="相关性概览">{hero_tiles}</nav>
     </div>
   </header>
@@ -253,7 +261,7 @@ def render_html(run: DigestRun, output_dir: str | Path | None = None) -> str:
       </div>
     </aside>
     <main>
-      <section class="panel">
+      <section class="panel interest-panel">
         <h2>近期研究兴趣</h2>
         <p>{interest_summary}</p>
         {'<div class="topics">' + high_topic_html + '</div>' if high_topic_html else ''}
@@ -268,7 +276,10 @@ def render_html(run: DigestRun, output_dir: str | Path | None = None) -> str:
       </div>
       <p class="empty" id="empty" hidden>当前筛选条件下没有匹配论文。</p>
       {'<section class="panel"><h2>跳过的邮件</h2><ul class="skipped-list">' + skipped_items + '</ul></section>' if skipped_items else ''}
-      <footer>由本地 ScholarInbox 工作流生成。收藏与已读状态只保存在本机浏览器中，跨日报共享，保留 60 天；打开原文会自动标为已读。</footer>
+      <footer>
+        <span>收藏与已读只保存在本机浏览器，跨日报共享，保留 60 天；打开原文会自动标为已读。</span>
+        <span class="theme-switch" aria-label="阅读版式">版式 {theme_buttons}</span>
+      </footer>
     </main>
   </div>
   <div class="lightbox" id="lightbox" hidden><img alt="放大的 TOC 或邮件图片"></div>
@@ -411,14 +422,14 @@ def _render_paper_card(paper: RankedPaper, index: int, output_dir: str | Path | 
       <article class="paper-card row" id="p-{index}" {attributes}>
         <details class="row-details">
           <summary>
-            <span class="row-main"><span class="title-zh">{index}. {escape(title_zh)}</span><span class="row-en">英文原题：{escape(entry.title)}</span></span>
+            <span class="row-main"><span class="title-zh">{index}. {escape(title_zh)}</span><span class="row-en">{escape(entry.title)}</span></span>
             <span class="row-side"><span class="venue-chip">{escape(venue)}</span>{badge}</span>
           </summary>
           <div class="details-body"><div class="row-body">
             {topics}
             {summary_html}
             <p>{escape(paper.reason_zh)}</p>
-            <p class="venue">期刊/来源：{escape(venue)}</p>
+            <p class="venue">{escape(venue)}</p>
             {source_html}
             {doi_html}
             {abstract_source_html}
@@ -432,8 +443,8 @@ def _render_paper_card(paper: RankedPaper, index: int, output_dir: str | Path | 
       <article class="paper-card full" id="p-{index}" {attributes}>
         <div class="card-head">{badge}<span class="card-tools">{star_button}{read_button}</span></div>
         <h3><span class="num">{index}.</span><span class="title-zh">{escape(title_zh)}</span></h3>
-        <p class="meta">英文原题：{escape(entry.title)}</p>
-        <p class="venue">期刊/来源：{escape(venue)}</p>
+        <p class="meta en-title"><span class="k">英文原题：</span>{escape(entry.title)}</p>
+        <p class="venue"><span class="k">期刊/来源：</span>{escape(venue)}</p>
         {topics}
         <p class="summary">{escape(paper.summary_zh)}</p>
         <details class="card-details">
