@@ -367,7 +367,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             progress.detail(f"评级结果缓存命中 {len(cached_ranked)} 篇，仅需分析 {len(to_rank)} 篇")
         progress.detail(f"调用 LLM 分批评级：{len(to_rank)} 篇论文")
         batch_size = int(config["performance"].get("ranking_batch_size", 10))
-        progress.item(0, (len(to_rank) + batch_size - 1) // batch_size, "论文排序与中文摘要")
+        progress.item(0, (len(to_rank) + batch_size - 1) // batch_size, "论文相关性评级")
         ranked = rank_papers(
             to_rank,
             interest_profile,
@@ -377,7 +377,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             separate_translation=separate_translation,
             abstract_max_chars=int(config["performance"].get("ranking_abstract_max_chars", 2000)),
             max_workers=int(config["performance"].get("ranking_max_workers", 3)),
-            progress=lambda current, total: report_items(current, total, "论文排序与中文摘要"),
+            progress=lambda current, total: report_items(current, total, "论文相关性评级"),
             event_callback=report_detail,
             cancel_event=metrics.cancel_event,
         ) if to_rank else []
@@ -513,9 +513,14 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
                 progress.detail(f"无法清理旧日报：{name}")
 
     progress.done("文献日报已生成")
-    progress.output(
-        f"邮件 {stats.emails_read} 封 · 新论文 {len(candidate_entries)} 篇 · "
-        f"高相关 {stats.high_relevance} · 中相关 {stats.medium_relevance}"
+    verified = sum(1 for paper in ranked if paper.evidence is not None)
+    facts = [f"邮件 {stats.emails_read} 封", f"新论文 {len(candidate_entries)} 篇"]
+    if verified:
+        facts.append(f"核验摘要 {verified} 篇")
+    progress.summary(
+        [("高相关", stats.high_relevance), ("中相关", stats.medium_relevance), ("低相关", stats.low_relevance),
+         ("领域外", stats.off_topic), ("不相关", stats.irrelevant)],
+        facts,
     )
     progress.detail(
         f"Stats: emails={stats.emails_read}, entries={stats.paper_entries_extracted}, "
@@ -548,9 +553,18 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
     if remaining:
         progress.output(remaining, style="cyan")
     if progress.run_log_path is not None:
-        progress.output(f"日志：{progress.run_log_path}", style="dim")
+        progress.output(f"日志：{_display_path(progress.run_log_path)}", style="dim")
     progress.close()
     return 0
+
+
+def _display_path(path: Path | str) -> str:
+    """Project-relative path for terminal display; absolute when outside the working directory."""
+    target = Path(path).resolve()
+    try:
+        return str(target.relative_to(Path.cwd().resolve()))
+    except ValueError:
+        return str(target)
 
 
 def _remaining_unread_note(unread_estimate: int | None, marked_read: int) -> str:
