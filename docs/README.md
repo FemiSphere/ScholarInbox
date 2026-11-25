@@ -4,7 +4,7 @@
 
 | 任务 | 首先读取 | 再按需要读取 |
 | --- | --- | --- |
-| 安装、日常运行 | [项目说明](../README.md) | [快捷命令/代理/自动化](automation-and-shortcuts.md) |
+| 安装、日常运行 | [项目说明](../README.zh-CN.md) | [快捷命令/代理/自动化](automation-and-shortcuts.md) |
 | 修改代码、定位职责和测试 | [代码与测试地图](code-map.md) | 对应源码与测试 |
 | 理解流水线/失败边界 | [当前架构](architecture-and-performance.md) | [数据类型](../literature_digest/models.py) |
 | 程序变慢、回退、取消或文件清理 | [维护与排障](maintenance.md) | 同次运行的日志/请求指标 |

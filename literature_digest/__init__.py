@@ -9,5 +9,5 @@ try:
     __version__ = _distribution.version
     __author__ = _distribution.metadata.get("Author") or "马心远"
 except PackageNotFoundError:  # pragma: no cover - source tree without installation
-    __version__ = "0.2.0"
+    __version__ = "0.3.0"
     __author__ = "马心远"

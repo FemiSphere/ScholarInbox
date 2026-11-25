@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="380" viewBox="0 0 1280 380" role="img" aria-label="ScholarInbox — turn academic alert emails into a daily reading digest">
+  <defs>
+    <radialGradient id="pink" cx="88%" cy="8%" r="55%">
+      <stop offset="0" stop-color="#ffd3e0"/><stop offset="1" stop-color="#ffd3e0" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="mint" cx="68%" cy="105%" r="50%">
+      <stop offset="0" stop-color="#d4f5ea"/><stop offset="1" stop-color="#d4f5ea" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="lilac" cx="102%" cy="62%" r="45%">
+      <stop offset="0" stop-color="#e0dcff"/><stop offset="1" stop-color="#e0dcff" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="card"><rect x="16" y="16" width="1248" height="348" rx="36"/></clipPath>
+  </defs>
+  <rect width="1280" height="380" fill="#f5f6fb"/>
+  <g clip-path="url(#card)">
+    <rect x="16" y="16" width="1248" height="348" fill="#ffffff"/>
+    <rect x="16" y="16" width="1248" height="348" fill="url(#pink)"/>
+    <rect x="16" y="16" width="1248" height="348" fill="url(#mint)"/>
+    <rect x="16" y="16" width="1248" height="348" fill="url(#lilac)"/>
+  </g>
+  <rect x="16.5" y="16.5" width="1247" height="347" rx="36" fill="none" stroke="#e3e6f0"/>
+
+  <!-- shapes -->
+  <rect x="1010" y="70" width="118" height="118" rx="34" fill="#6a5cff" transform="rotate(12 1069 129)"/>
+  <circle cx="930" cy="190" r="38" fill="#ff9f2e"/>
+  <rect x="1040" y="230" width="170" height="48" rx="24" fill="#2bbf9a" transform="rotate(-10 1125 254)"/>
+  <circle cx="1170" cy="86" r="14" fill="#ff5f87"/>
+  <rect x="880" y="272" width="62" height="62" rx="16" fill="#ffd166" transform="rotate(-14 911 303)"/>
+
+  <!-- text -->
+  <text x="88" y="118" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="700" letter-spacing="3.5" fill="#6a5cff">PERSONAL LITERATURE DIGEST</text>
+  <text x="84" y="210" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="92" font-weight="800" letter-spacing="-2.5" fill="#1b1d2b">ScholarInbox</text>
+  <text x="88" y="262" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="26" font-weight="500" fill="#3f4256">Your academic alert emails, turned into a beautiful daily reading list.</text>
+  <g font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="700">
+    <rect x="88" y="294" width="150" height="36" rx="18" fill="#ffe3ea"/><text x="163" y="317" text-anchor="middle" fill="#e2416d">Ranked for you</text>
+    <rect x="250" y="294" width="170" height="36" rx="18" fill="#fff0dc"/><text x="335" y="317" text-anchor="middle" fill="#d9790d">Verified abstracts</text>
+    <rect x="432" y="294" width="184" height="36" rx="18" fill="#dcf5ee"/><text x="524" y="317" text-anchor="middle" fill="#158a6c">Seven reading styles</text>
+  </g>
+</svg>
