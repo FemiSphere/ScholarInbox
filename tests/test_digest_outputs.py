@@ -193,13 +193,27 @@ def test_reading_themes_default_from_config_and_are_switchable(tmp_path):
     run = DigestRun(date_label="2026-11-25", stats=RunStats(), interest_profile=InterestProfile(summary_zh="测试"),
                     papers=[_ranked("Pentagonal COF", "high", .9)])
     default = render_html(run)
-    assert '<html lang="zh-CN" data-theme="pop">' in default
+    assert '<html lang="zh-CN" data-theme="fresh">' in default
     assert '<html lang="zh-CN" data-theme="riso">' in render_html(run, theme="riso")
-    assert '<html lang="zh-CN" data-theme="pop">' in render_html(run, theme="unknown")
-    for key in ("pop", "bauhaus", "riso", "fresh"):
+    assert '<html lang="zh-CN" data-theme="fresh">' in render_html(run, theme="unknown")
+    for key in ("fresh", "pop", "bauhaus", "riso", "editorial", "swiss", "calm"):
         assert f'data-theme-choice="{key}"' in default
     # stored choice is applied in <head>, before first paint (no theme flash)
     assert default.index("scholarinbox:theme") < default.index("<style>")
     # scroll flicker sources are gone
     for removed in ("backdrop-filter", "IntersectionObserver(entries => {\n        for (const entry of entries) if (entry.isIntersecting) { entry.target.classList.add('in')", "drift"):
         assert removed not in default
+
+
+def test_theme_families_are_scoped_and_do_not_leak():
+    from literature_digest.digest_assets import DIGEST_CSS, scope_css
+    scoped = scope_css("html { a: 1; } .chip { b: 2; } html[data-theme] h1 { c: 3; } @media (x) { .y { d: 4; } } @keyframes k { from { opacity: 0; } }", ("t1",))
+    assert ':is(html[data-theme="t1"]) { a: 1; }' in scoped
+    assert ':is(html[data-theme="t1"]) .chip' in scoped
+    assert ':is(html[data-theme="t1"]) h1' in scoped
+    assert '@media (x) {\n:is(html[data-theme="t1"]) .y' in scoped
+    assert "@keyframes k { from { opacity: 0; } }" in scoped
+    # every rule in the final sheet is scoped to a theme (no global .chip etc.)
+    for line in DIGEST_CSS.splitlines():
+        if line and not line.startswith(("@", "}", " ")) and "{" in line:
+            assert line.startswith((":is(html[data-theme", "html[data-theme")), line

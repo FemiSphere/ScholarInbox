@@ -13,8 +13,9 @@ from .digest_assets import DIGEST_CSS, DIGEST_JS
 from .models import RELEVANCE_LABELS, RELEVANCE_LEVELS, DigestRun, PaperEntry, RankedPaper
 
 # HTML reading styles (keys are CSS html[data-theme] values) and the default one.
-THEMES = {"pop": "波普", "bauhaus": "色块", "riso": "印刷", "fresh": "清新"}
-DEFAULT_THEME = "pop"
+THEMES = {"fresh": "清新", "pop": "波普", "bauhaus": "色块", "riso": "印刷",
+          "editorial": "期刊", "swiss": "极简", "calm": "宁静"}
+DEFAULT_THEME = "fresh"
 
 
 def write_digest(run: DigestRun, output_dir: str | Path) -> Path:
@@ -169,7 +170,8 @@ def _unique_output_stem(
 def render_html(run: DigestRun, output_dir: str | Path | None = None, *, theme: str = DEFAULT_THEME) -> str:
     theme = theme if theme in THEMES else DEFAULT_THEME
     theme_buttons = "".join(
-        f'<button type="button" data-theme-choice="{key}" aria-pressed="false">{label}</button>'
+        ('<span class="theme-sep" aria-hidden="true">·</span>' if key == "editorial" else "")
+        + f'<button type="button" data-theme-choice="{key}" aria-pressed="false">{label}</button>'
         for key, label in THEMES.items()
     )
     stats = run.stats
