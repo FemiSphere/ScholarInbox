@@ -96,6 +96,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "parsing": {
         "cache_enabled": True,
         "cache_dir": "data/cache/email_parsing",
+        # Parse-cache files are deleted once their emails are marked as read; leftovers expire after this.
+        "cache_ttl_days": 30,
         "save_toc_images": True,
         "toc_image_dir": "data/toc_images",
         "max_images_per_email": 20,
@@ -114,7 +116,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "output_formats": ["html"],
         # HTML reading style. Bright: fresh, pop, bauhaus, riso. Academic: editorial, swiss, calm.
         "theme": "fresh",
-        "cleanup_old_outputs": False,
+        "cleanup_old_outputs": True,
         "overwrite_existing": False,
         "include_low_relevance": True,
         "include_off_topic": True,

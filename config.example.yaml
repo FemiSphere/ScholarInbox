@@ -61,7 +61,7 @@ digest:
   # output / 输出
   output_dir: "outputs"            # where digests are written / 日报保存目录
   output_formats: ["html"]         # add "md" for a Markdown copy / 加 "md" 同时输出 Markdown
-  cleanup_old_outputs: false       # delete digests older than 60 days after a real run / 正式运行后清理 60 天前的日报
+  cleanup_old_outputs: true        # delete digests (and their TOC images) older than 60 days / 清理 60 天前的日报及其图片
   overwrite_existing: false        # false: a second run on the same day writes -2, -3 / 同日多次运行追加 -2、-3
   include_low_relevance: true      # show the 低相关 list / 展示低相关
   include_off_topic: true          # show the folded 领域外 list / 展示折叠的领域外
@@ -172,6 +172,7 @@ result_cache:
 parsing:
   cache_enabled: true                # remember successfully parsed emails / 缓存已解析邮件
   cache_dir: "data/cache/email_parsing"
+  cache_ttl_days: 30                 # removed after emails are marked read; leftovers expire / 标为已读后删除，残留 30 天过期
   llm_structure_non_scholar: true    # use the model to read journal / publisher emails / 用模型解析期刊邮件
   save_toc_images: true              # keep table-of-contents images for the digest / 保存目录图片
   toc_image_dir: "data/toc_images"

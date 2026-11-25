@@ -14,3 +14,5 @@ def _hermetic_environment(monkeypatch):
         monkeypatch.delenv(name, raising=False)
     for name in ("FORCE_COLOR", "NO_COLOR"):
         monkeypatch.delenv(name, raising=False)
+    # Tests chdir into temporary folders; keep the CLI there instead of jumping to the checkout.
+    monkeypatch.setenv("SCHOLAR_INBOX_HOME", ".")

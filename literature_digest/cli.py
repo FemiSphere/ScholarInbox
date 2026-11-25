@@ -27,7 +27,7 @@ from .interests import (
     read_research_interests,
 )
 from .llm import build_llm_client
-from .housekeeping import prune_old_logs
+from .housekeeping import prune_old_logs, prune_stale_files, remove_files
 from .result_cache import ResultCache, ResultCacheError, analysis_key, translation_key
 from .models import RELEVANCE_LABELS, RELEVANCE_LEVELS, DigestRun, RunStats, SkippedEmail
 from .parsers import parse_emails
@@ -45,7 +45,7 @@ from .ui import ProgressReporter
 
 
 def main(argv: list[str] | None = None) -> int:
-    arguments = list(sys.argv[1:] if argv is None else argv)
+    arguments = _anchor_to_project(list(sys.argv[1:] if argv is None else argv))
     if arguments and arguments[0] in {"init", "doctor"}:
         from .setup_wizard import run_doctor, run_init
         try:
@@ -90,6 +90,50 @@ def main(argv: list[str] | None = None) -> int:
                 reporter.output(f"日志：{reporter.run_log_path}", style="dim")
             reporter.close()
 
+
+
+def _anchor_to_project(arguments: list[str]) -> list[str]:
+    """Run inside the ScholarInbox folder so outputs, logs and data never land elsewhere.
+
+    The home is SCHOLAR_INBOX_HOME when set ("." = current directory); otherwise the current
+    directory if it is a ScholarInbox folder, else the source checkout this package runs from.
+    A relative --config path is made absolute first, so it still means what the user typed.
+    """
+    home = _project_home()
+    cwd = Path.cwd()
+    if home is None or home == cwd.resolve():
+        return arguments
+    fixed = list(arguments)
+    for index, value in enumerate(fixed):
+        if value == "--config" and index + 1 < len(fixed):
+            fixed[index + 1] = str((cwd / fixed[index + 1]).resolve())
+        elif value.startswith("--config="):
+            fixed[index] = "--config=" + str((cwd / value.split("=", 1)[1]).resolve())
+    os.chdir(home)
+    return fixed
+
+
+def _is_project_folder(path: Path) -> bool:
+    if (path / "config.local.yaml").exists():
+        return True
+    pyproject = path / "pyproject.toml"
+    try:
+        return pyproject.is_file() and 'name = "scholar-inbox"' in pyproject.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+def _project_home() -> Path | None:
+    configured = os.environ.get("SCHOLAR_INBOX_HOME", "").strip()
+    if configured:
+        return Path.cwd().resolve() if configured == "." else Path(configured).expanduser().resolve()
+    cwd = Path.cwd().resolve()
+    if _is_project_folder(cwd):
+        return cwd
+    source_root = Path(__file__).resolve().parent.parent
+    if _is_project_folder(source_root):
+        return source_root
+    return None
 
 def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]) -> int:
     parser = build_arg_parser()
@@ -238,6 +282,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
     progress.detail(f"邮件过滤完成：保留 {len(accepted)} 封，跳过 {len(skipped)} 封")
 
     progress.item(0, len(accepted), "解析论文条目")
+    used_parse_cache: list[Path] = []
     entries = parse_emails(
         accepted,
         llm=llm,
@@ -247,6 +292,7 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
         cache_dir=None if sample_mode or not config["parsing"].get("cache_enabled", True) else
             _resolve_path(config["parsing"].get("cache_dir", "data/cache/email_parsing"), base_dir),
         cache_namespace=_llm_cache_fingerprint(config),
+        used_cache_paths=used_parse_cache,
         llm_structure_non_scholar=bool(config["parsing"].get("llm_structure_non_scholar", True)),
         max_workers=int(config["performance"].get("parsing_max_workers", 3)),
         llm_text_max_chars=int(config["performance"].get("email_text_max_chars", 12000)),
@@ -494,6 +540,10 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             progress.close()
             return 2
         marked_read = len(read_ids)
+        # These emails will not be read again, so their parse cache is no longer useful.
+        dropped = remove_files(used_parse_cache)
+        if dropped:
+            progress.detail(f"已删除已处理邮件的解析缓存：{dropped} 个")
 
     cache = resources.get("result_cache")
     if cache is not None:
@@ -512,6 +562,11 @@ def _main(argv: list[str] | None, metrics: RunMetrics, resources: dict[str, Any]
             progress.detail(f"已清理超过 60 天的日报：{removed} 个")
             for name in failed:
                 progress.detail(f"无法清理旧日报：{name}")
+        # TOC images are only referenced by digests, so they follow the same 60-day window.
+        image_dir = _resolve_path(config["parsing"].get("toc_image_dir", "data/toc_images"), base_dir)
+        images, _ = prune_stale_files(image_dir, max_age_days=60)
+        if images:
+            progress.detail(f"已清理超过 60 天的目录图片：{images} 个")
 
     progress.done("文献日报已生成")
     verified = sum(1 for paper in ranked if paper.evidence is not None)
@@ -587,6 +642,11 @@ def _prune_logs(config: dict[str, Any], base_dir: Path, progress: ProgressReport
         progress.detail(f"已清理超过 {retention} 天的日志：{removed} 个")
     for name in failed:
         progress.detail(f"无法清理旧日志：{name}")
+    # Safety net for parse-cache files of emails that were never marked as read.
+    parse_cache = _resolve_path(config["parsing"].get("cache_dir", "data/cache/email_parsing"), base_dir)
+    stale, _ = prune_stale_files(parse_cache, max_age_days=float(config["parsing"].get("cache_ttl_days", 30)))
+    if stale:
+        progress.detail(f"已清理超过 30 天的邮件解析缓存：{stale} 个")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

@@ -61,10 +61,10 @@ class GmailClient:
             ) from exc
 
         if self.token_path.exists():
-            backup_path = self.token_path.with_name(
-                f"{self.token_path.stem}.backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}{self.token_path.suffix}"
-            )
-            self.token_path.rename(backup_path)
+            # Keep exactly one previous token, inside the project's data folder.
+            backup_path = self.base_dir / "data" / "config_backups" / "token.backup.json"
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
+            self.token_path.replace(backup_path)
 
         try:
             creds = self._authorize_with_browser(InstalledAppFlow)

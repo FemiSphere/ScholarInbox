@@ -100,7 +100,7 @@ flowchart LR
     E --> F["📚 Your digest<br>(HTML)"]
 ```
 
-Everything runs on your own computer. Emails are only marked as read after a fully successful run, and nothing is ever deleted.
+Everything runs on your own computer and stays inside the project folder — even if you start it from somewhere else. Old digests, logs and caches are cleaned up automatically. Emails are only marked as read after a fully successful run, and are never deleted.
 
 ## 🚀 Get started in five steps
 

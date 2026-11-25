@@ -139,7 +139,10 @@ def parse_emails(
     cache_dir: Path | None = None,
     cache_namespace: str = "",
     cancel_event: Event | None = None,
+    used_cache_paths: list[Path] | None = None,
 ) -> list[PaperEntry]:
+    """``used_cache_paths`` (optional) collects the cache file of every parsed email so the
+    caller can delete them once those emails are marked as read."""
     email_list = list(emails)
     callback_lock = Lock()
 
@@ -164,6 +167,9 @@ def parse_emails(
             }
             key = hashlib.sha256(json.dumps(signature, sort_keys=True, default=str).encode()).hexdigest()
             cache_path = Path(cache_dir) / f"{key}.json"
+            if used_cache_paths is not None:
+                with callback_lock:
+                    used_cache_paths.append(cache_path)
             cached = _read_parse_cache(cache_path)
             if cached is not None:
                 emit(f"邮件解析 {index}/{len(email_list)}：缓存命中，条目 {len(cached)}")

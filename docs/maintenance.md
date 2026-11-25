@@ -48,6 +48,8 @@ rg -n '回退|timeout|output_length|budget|web_|evidence_' logs/digest-指定运
 
 ## 目录与清理
 
+程序始终在 ScholarInbox 项目目录内运行：从其他目录启动时会先切换到项目目录（当前目录含 `config.local.yaml`，或本包所在的源码目录），所以 `outputs/`、`logs/`、`data/` 不会出现在别处。`SCHOLAR_INBOX_HOME` 可指定其他目录，设为 `.` 表示使用当前目录（测试即如此）。项目目录之外只有：Codex 后端调用时的系统临时文件（调用后立即删除）、浏览器本地存储中的已读/收藏（60 天过期）与版式选择，以及 Codex CLI 自身目录（默认 `--ephemeral`）。
+
 | 路径 | 用途 | 保留/清理规则 |
 | --- | --- | --- |
 | `literature_digest/`、`tests/`、`scripts/` | 源码、测试、启动/诊断脚本 | Git 管理；不为美观改导入/入口 |
@@ -57,15 +59,15 @@ rg -n '回退|timeout|output_length|budget|web_|evidence_' logs/digest-指定运
 | `research_interests.md` | 用户维护的当前科研兴趣 | 不是缓存；不要自动改写研究方向 |
 | `docs/`、`docs/history/` | 当前导航/机制、历史证据 | 按任务读取，不批量载入历史 |
 | `examples/` | 公开阅读页示例 | 与私有 outputs 区分 |
-| `outputs/` | MD/HTML 日报 | 默认长期保留。开启 `digest.cleanup_old_outputs` 后，正式成功运行仅清理文件名日期早于当天减 60 天的日报，保留本次输出。 |
+| `outputs/` | MD/HTML 日报 | `digest.cleanup_old_outputs` 默认开启：正式成功运行后清理文件名日期早于 60 天的日报（保留本次输出），并清理 60 天未修改的 `data/toc_images/` 文件。 |
 | `logs/`、`logs/metrics/` | 诊断证据 | 每次非 sample 运行结束后，删除文件名日期早于 `telemetry.log_retention_days`（默认 30）天的 `digest-*.log`、`requests-*.jsonl`、`metrics-*.log`；其他文件不动，0 表示全部保留 |
 | `data/paper_registry.json` | 近 30 天去重身份 | 不当作缓存清除；丢失会影响重复处理 |
-| `data/cache/email_parsing/` | 成功邮件提取缓存 | 本地私有；当前没有全局容量回收，不宣称自动清完 |
+| `data/cache/email_parsing/` | 成功邮件提取缓存 | 邮件被成功标为已读后删除本次用到的缓存文件；残留文件 `parsing.cache_ttl_days`（默认 30）天未修改即删除。未开启标已读时保留，供下次复用 |
 | `data/cache/research_interests.json` | 兴趣画像缓存 | 按内容哈希失效；不等于兴趣源文件 |
 | `data/cache/web_evidence.sqlite3` | 来源摘要缓存 | 300 条/8 MiB/30 天，负缓存 6 小时，自动淘汰；停机后可删 |
 | `data/cache/results.sqlite3` | 每篇论文的评级与翻译结果（仅成功结果） | 正式运行成功后清空；否则 7 天过期、最多 5000 条（`result_cache.*`）；回退重跑或 dry-run 后正式运行时复用；停机后可删 |
-| `data/toc_images/` | 日报图片资源 | 已有 HTML 可能引用，不单独批量删除 |
-| `data/config_backups/`、`data/validation/` | 私有备份/历史核验 | 不是程序抓取垃圾；有目的地保留/人工归档。2026-11-25 根目录的旧配置备份、令牌备份与 OAuth 笔记移至 `data/config_backups/root-files-20261125/` |
+| `data/toc_images/` | 日报图片资源 | 随旧日报清理：60 天未修改的图片删除（只有日报引用它们） |
+| `data/config_backups/` | 私有备份 | 重新授权 Gmail 时只保留一份旧令牌 `token.backup.json`（覆盖写入）；其余为人工保留的备份，程序不自动删除 |
 | `.pytest_cache/`、`__pycache__/` | 可再生成的测试/字节码 | 无运行进程时可清理；不要顺带删未知 `.tmp` 内容 |
 | `*.egg-info/` | editable 安装元数据 | 已忽略；不当临时日志删除，可能影响安装元数据查询 |
 

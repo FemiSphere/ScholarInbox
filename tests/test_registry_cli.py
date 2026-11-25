@@ -216,6 +216,9 @@ def test_old_outputs_are_pruned_only_after_enabled_formal_run(tmp_path, monkeypa
     old = outputs / '2020-01-01-digest.html'
     old.touch()
     args = ['--config', config_path, '--date', '2020-01-02', '--quiet']
+    disabled = json.loads((tmp_path / 'config.json').read_text())
+    disabled['digest']['cleanup_old_outputs'] = False  # cleanup is on by default; test the off switch
+    (tmp_path / 'config.json').write_text(json.dumps(disabled))
 
     assert cli.main([*args, '--no-dry-run']) == 0
     assert old.exists()

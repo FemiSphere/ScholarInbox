@@ -23,7 +23,7 @@
 | 并发/取消/阶段预算 | `concurrency.py:cooperative_map`、`llm/base.py:llm_time_budget`、`cli.py:main` | `test_concurrency.py`、`test_api_resilience.py`、`test_enrichment_pipeline.py` |
 | HTML/MD、论文详情、图片、来源链接 | `digest.py:write_digests/render_html/_render_paper_card`；页面样式（七套版式：明亮 fresh/pop/bauhaus/riso 与学术 editorial/swiss/calm，各自样式由 `scope_css` 限定作用范围，`digest.theme` 选择默认值）与交互（已读/收藏、导出、版式切换）在 `digest_assets.py` | `test_digest_outputs.py`、`test_ranking_and_digest.py`、`test_ranking_evidence.py` |
 | 评级/翻译结果缓存、截断后翻译 | `result_cache.py:ResultCache`、`cli.py:_open_result_cache/_translate_displayed` | `test_result_cache.py` |
-| 日志保留期、剩余未读提示 | `housekeeping.py:prune_old_logs`、`cli.py:_prune_logs/_remaining_unread_note` | `test_housekeeping.py` |
+| 文件保留与清理（日志、解析缓存、图片）、项目目录锚定、剩余未读提示 | `housekeeping.py:prune_old_logs/prune_stale_files/remove_files`、`cli.py:_anchor_to_project/_project_home/_prune_logs/_remaining_unread_note` | `test_housekeeping.py` |
 | 终端标题（静态）、阶段清单、单行进度、结果摘要、OSC 8、纯文本日志 | `ui.py:ProgressReporter/_header` | `test_ui.py` |
 | 请求状态、token/耗时、实时事件 | `telemetry.py:RunMetrics/llm_operation` | `test_live_metrics.py`、`test_performance.py` |
 

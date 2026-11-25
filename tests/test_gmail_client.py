@@ -251,9 +251,10 @@ def test_reauthorize_backs_up_existing_token_and_writes_new_token(tmp_path, monk
 
     assert token_path == tmp_path / "token.json"
     assert token_path.read_text(encoding="utf-8") == '{"authorized": true}'
-    backups = list(tmp_path.glob("token.backup-*.json"))
-    assert len(backups) == 1
-    assert backups[0].read_text(encoding="utf-8") == "old-token"
+    # exactly one backup, kept inside the project's data folder (not next to token.json)
+    assert not list(tmp_path.glob("token.backup*.json"))
+    backup = tmp_path / "data" / "config_backups" / "token.backup.json"
+    assert backup.read_text(encoding="utf-8") == "old-token"
     assert captured["credentials_path"] == str(tmp_path / "credentials.json")
     assert captured["scopes"] == GMAIL_SCOPES
     assert captured["port"] == 0

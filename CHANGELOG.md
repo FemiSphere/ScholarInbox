@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Everything stays inside the project folder: the CLI anchors itself there even when started
+  elsewhere (`SCHOLAR_INBOX_HOME` overrides; `.` = current directory).
+- Digest cleanup (60 days) is on by default and also removes old TOC images; parse-cache files are
+  deleted once their emails are marked read (leftovers expire after 30 days); Gmail re-authorisation
+  keeps a single token backup in `data/config_backups/`.
+
 ## 0.3.0 — 2026-11-25
 
 A large usability release: better papers, a better page, a calmer terminal and an easier setup.
