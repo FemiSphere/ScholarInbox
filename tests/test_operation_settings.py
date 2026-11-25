@@ -1,7 +1,6 @@
 """Operation policies remain isolated when a shared client serves parallel tasks."""
 import json
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -65,10 +64,16 @@ def test_parallel_thinking_and_translation_payloads_are_isolated(monkeypatch):
 def test_operation_budget_shared_by_retries_and_json_repair(monkeypatch):
     client = make_client(monkeypatch, operation_settings={"paper_ranking": {"request_budget_seconds": 0.1}})
     calls = []
+    # A fake clock keeps this deterministic on slow CI machines: each request "takes" 0.04 s
+    # and retry back-off sleeps advance the same clock instead of real time.
+    from literature_digest.llm import openai_compatible as module
+    clock = [0.0]
+    monkeypatch.setattr(module, "perf_counter", lambda: clock[0])
+    monkeypatch.setattr(module, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
 
     def fetch(self, request, timeout):
         calls.append(timeout)
-        time.sleep(0.04)
+        clock[0] += 0.04
         if len(calls) == 1:
             raise TimeoutError()
         return {"choices": [{"message": {"content": "not json"}}]}
